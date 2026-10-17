@@ -1,16 +1,22 @@
-import dataclasses
 import json
 
 from common import PaperData
 from config import settings
 from services.api import OpenAlexClient, SemanticScholarClient
 from services.models import rerank
+from utils import as_response_dict
 
 from .paper_deduplicator import remove_duplicates
 from .query_cleaner import remove_wildcards
 
 semantic_scholar_client = SemanticScholarClient()
 open_alex_client = OpenAlexClient()
+
+# `relevance_score` is a ranking input, not an answer. Its scale is per-source and
+# per-search-mode — OpenAlex keyword scores run into the thousands where its semantic
+# ones sit around 1 — so a caller could only misread it. Dropping it keeps the returned
+# object the seven fields the docstring promises, and keeps both lists the same shape.
+_DROPPED_FIELDS = {"relevance_score"}
 
 def find_relevant_papers(query: str, top_k: int = 5) -> str:
     """
@@ -65,27 +71,13 @@ def find_relevant_papers(query: str, top_k: int = 5) -> str:
 
     result = json.dumps(
         {
-            "papers": [_as_response_dict(paper) for paper in reranked.papers],
+            "papers": [
+                as_response_dict(paper, _DROPPED_FIELDS) for paper in reranked.papers
+            ],
             "relevant_without_abstract": [
-                _as_response_dict(paper)
+                as_response_dict(paper, _DROPPED_FIELDS)
                 for paper in reranked.relevant_without_abstract
             ],
         }
     )
     return result
-
-
-def _as_response_dict(paper: PaperData) -> dict:
-    """One paper as the caller sees it.
-
-    `relevance_score` is a ranking input, not an answer. Its scale is per-source
-    and per-search-mode — OpenAlex keyword scores run into the thousands where its
-    semantic ones sit around 1 — so a caller could only misread it. Dropping it
-    keeps the returned object the seven fields the docstring promises, and keeps
-    both lists the same shape.
-    """
-    return {
-        key: value
-        for key, value in dataclasses.asdict(paper).items()
-        if key != "relevance_score"
-    }

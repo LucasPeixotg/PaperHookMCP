@@ -1,13 +1,11 @@
-import dataclasses
 import json
 from typing import Literal
 
 from fastmcp.exceptions import ToolError
 
-from common import CitingPaperData
 from services.api import OpenAlexClient
 from services.api.api_client import APIError
-from utils import to_openalex_id
+from utils import as_response_dict, to_openalex_id
 
 open_alex_client = OpenAlexClient()
 
@@ -60,12 +58,5 @@ def get_references(
     except APIError as error:
         raise ToolError(f"Could not fetch references for {paper_id!r}: {error}") from error
 
-    return json.dumps([_as_response_dict(paper) for paper in referenced])
+    return json.dumps([as_response_dict(paper, _DROPPED_FIELDS) for paper in referenced])
 
-
-def _as_response_dict(paper: CitingPaperData) -> dict:
-    return {
-        key: value
-        for key, value in dataclasses.asdict(paper).items()
-        if key not in _DROPPED_FIELDS
-    }
