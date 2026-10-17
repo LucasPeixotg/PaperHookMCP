@@ -1008,3 +1008,156 @@ def test_failed_search_writes_nothing(monkeypatch, paper_store):
 
     assert client.semantic_search_papers("attention") == []
     assert paper_store.get("W2626778328") is None
+
+
+# --- request pointers -------------------------------------------------------------
+#
+# Every request is cached as pointers into the store: a repeat is answered with no
+# request, a request differing in any parameter goes live, and a failure is never
+# remembered as an empty answer.
+
+def test_a_repeated_search_makes_one_request(monkeypatch, paper_store, search):
+    handler, calls = recorder(ok(item(), item(id="https://openalex.org/W2",
+                                              relevance_score=0.5)))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    first = getattr(client, search)("attention")
+    second = getattr(client, search)("attention")
+
+    assert first == second
+    assert [p.relevance_score for p in second] == [1.2024246507243719, 0.5]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("second_call", [
+    {"query": "attention again"},
+    {"query": "attention", "limit": 20},
+])
+def test_a_search_differing_in_any_parameter_goes_live(
+    monkeypatch, paper_store, search, second_call
+):
+    handler, calls = recorder(ok(item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    getattr(client, search)("attention")
+    getattr(client, search)(**second_call)
+
+    assert len(calls) == 2
+
+
+def test_an_empty_search_result_is_cached(monkeypatch, paper_store, search):
+    handler, calls = recorder(ok())
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    assert getattr(client, search)("nothing") == []
+    assert getattr(client, search)("nothing") == []
+    assert len(calls) == 1
+
+
+def test_a_failed_search_is_retried_next_time(monkeypatch, paper_store, search):
+    handler, calls = recorder(httpx.Response(503, text="down"), ok(item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    assert getattr(client, search)("attention") == []
+    assert len(getattr(client, search)("attention")) == 1
+    assert len(calls) == 2
+
+
+@LISTINGS
+def test_a_repeated_listing_makes_one_request(monkeypatch, paper_store, listing):
+    handler, calls = recorder(citing_page(citing(), count=57))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    first = getattr(client, listing)("W1")
+    papers, total = getattr(client, listing)("W1")
+
+    assert (papers, total) == first
+    assert type(papers[0]) is CitingPaperData
+    assert papers[0].venue == "NeurIPS"
+    assert papers[0].cited_by_count == 42
+    assert total == 57
+    assert len(calls) == 1
+
+
+@LISTINGS
+def test_a_listing_in_another_sort_goes_live(monkeypatch, paper_store, listing):
+    handler, calls = recorder(citing_page(citing()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    getattr(client, listing)("W1")
+    getattr(client, listing)("W1", sort="newest")
+
+    assert len(calls) == 2
+
+
+def test_repeated_author_works_make_one_request(monkeypatch, paper_store):
+    handler, calls = recorder(citing_page(citing()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.get_author_works("A1", publication_year_min=2020)
+    client.get_author_works("A1", publication_year_min=2020)
+    client.get_author_works("A1")
+
+    assert len(calls) == 2
+
+
+def test_get_work_by_doi_is_answered_from_the_store_the_second_time(
+    monkeypatch, paper_store
+):
+    handler, calls = recorder(httpx.Response(200, json={
+        "id": "https://openalex.org/W1", "display_name": "A", "cited_by_count": 3,
+    }))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    first = client.get_work("doi:10.1000/x")
+    second = client.get_work("doi:10.1000/x")
+
+    assert first == second == {"paper_id": "W1", "title": "A", "cited_by_count": 3}
+    assert len(calls) == 1
+
+
+def test_get_work_by_doi_does_not_trust_the_doi_alias(monkeypatch, paper_store):
+    """A search hit's DOI alias may name another record of the work: go live."""
+    handler, calls = recorder(
+        citing_page(citing()),
+        httpx.Response(200, json={"id": "https://openalex.org/W3000000001",
+                                  "display_name": "A Follow-up",
+                                  "cited_by_count": 42}),
+    )
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.get_citing_works("W9")
+    client.get_work("doi:10.1000/follow-up")
+
+    assert len(calls) == 2
+
+
+def test_repeated_author_search_makes_one_request(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(200, json={"results": [author()]}))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    assert client.search_authors("Ada") == [ADA]
+    assert client.search_authors("Ada") == [ADA]
+    assert len(calls) == 1
+
+
+def test_an_author_seen_in_a_search_is_found_by_id_and_orcid(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(200, json={"results": [author()]}))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.search_authors("Ada")
+
+    assert client.get_author("A5001234567") == ADA
+    assert client.get_author("orcid:0000-0002-1825-0097") == ADA
+    assert len(calls) == 1
+
+
+def test_a_failed_author_lookup_is_not_cached(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(404, text="nope"),
+                              httpx.Response(200, json=author()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    with pytest.raises(APIError):
+        client.get_author("A5001234567")
+    assert client.get_author("A5001234567") == ADA
+    assert len(calls) == 2

@@ -3,7 +3,7 @@ import logging
 
 from common import CitingPaperData, PaperData
 from config import settings
-from services.cache import PaperStore, get_paper_store
+from services.cache import PaperStore, get_paper_store, request_key
 from utils import bare_doi, bare_openalex_id, bare_orcid
 
 from .api_client import ApiClient, APIError
@@ -108,21 +108,18 @@ class OpenAlexClient(ApiClient):
         need to hear, not an empty result to paper over.
 
         A bare `W…` already in the paper store, with a title and a citation count, is
-        answered from there without a request. An external id always goes live, since
-        the store cannot tell which work it names until OpenAlex says.
+        answered from there without a request. An external id is answered only once
+        this lookup has resolved it before: the DOI alias alone may lead to another
+        OpenAlex record of the work, so it is OpenAlex's own answer that is cached.
         """
-        if self._paper_store and not key.startswith("doi:"):
-            cached = self._paper_store.get(key)
-            if cached and cached.get("title") and "cited_by_count" in cached:
-                return {
-                    "paper_id": cached["paper_id"],
-                    "title": cached["title"],
-                    "cited_by_count": cached["cited_by_count"],
-                }
+        endpoint = f"/works/{key}"
+        params = {"select": self.WORK_SUMMARY_FIELDS}
+        cache_key = request_key("GET", endpoint, params)
 
-        payload = self._request(
-            "GET", f"/works/{key}", params={"select": self.WORK_SUMMARY_FIELDS}
-        )
+        if cached := self._cached_work(key, cache_key):
+            return cached
+
+        payload = self._request("GET", endpoint, params=params)
 
         work = {
             "paper_id": bare_openalex_id(payload.get("id")),
@@ -131,7 +128,26 @@ class OpenAlexClient(ApiClient):
         }
         if self._paper_store:
             self._paper_store.put_summary(**work)
+            if key.startswith("doi:"):
+                self._paper_store.put_work_pointer(cache_key, work["paper_id"])
         return work
+
+    def _cached_work(self, key: str, cache_key: str) -> dict | None:
+        if not self._paper_store:
+            return None
+
+        paper_id = (
+            self._paper_store.get_work_pointer(cache_key)
+            if key.startswith("doi:") else key
+        )
+        cached = self._paper_store.get(paper_id) if paper_id else None
+        if cached and cached.get("title") and "cited_by_count" in cached:
+            return {
+                "paper_id": cached["paper_id"],
+                "title": cached["title"],
+                "cited_by_count": cached["cited_by_count"],
+            }
+        return None
 
     def get_citing_works(
         self, work_id: str, limit: int = 10, sort: str = "most_cited"
@@ -160,11 +176,17 @@ class OpenAlexClient(ApiClient):
         Raises APIError, as `get_work` does: a 404 means the caller named an author
         OpenAlex does not know.
         """
+        if self._paper_store and (cached := self._paper_store.get_author(key)):
+            return cached
+
         payload = self._request(
             "GET", f"/authors/{key}", params={"select": self.AUTHOR_FIELDS}
         )
 
-        return self._to_author_summary(payload)
+        author = self._to_author_summary(payload)
+        if self._paper_store:
+            self._paper_store.put_authors([author])
+        return author
 
     def search_authors(self, name: str, limit: int = 5) -> list[dict]:
         """The authors whose name best matches `name`, most relevant first.
@@ -176,17 +198,26 @@ class OpenAlexClient(ApiClient):
         if not name.strip():
             return []
 
-        payload = self._request(
-            "GET",
-            "/authors",
-            params={
-                "search": name,
-                "per-page": max(1, min(limit, self.MAX_LIMIT)),
-                "select": self.AUTHOR_FIELDS,
-            },
-        )
+        params = {
+            "search": name,
+            "per-page": max(1, min(limit, self.MAX_LIMIT)),
+            "select": self.AUTHOR_FIELDS,
+        }
+        cache_key = request_key("GET", "/authors", params)
+        if self._paper_store and (
+            cached := self._paper_store.get_author_pointers(cache_key)
+        ) is not None:
+            return cached
 
-        return [self._to_author_summary(item) for item in payload.get("results") or []]
+        payload = self._request("GET", "/authors", params=params)
+
+        authors = [
+            self._to_author_summary(item) for item in payload.get("results") or []
+        ]
+        if self._paper_store:
+            self._paper_store.put_authors(authors)
+            self._paper_store.put_author_pointers(cache_key, authors)
+        return authors
 
     def get_author_works(
         self, author_id: str, limit: int = 10, publication_year_min: int | None = None
@@ -211,21 +242,26 @@ class OpenAlexClient(ApiClient):
         but the filter: the endpoint, sorts, selected fields, mapping and the APIError
         left to propagate.
         """
-        payload = self._request(
-            "GET",
-            "/works",
-            params={
-                "filter": filter_value,
-                "sort": self.CITATION_SORTS[sort],
-                "per-page": max(1, min(limit, self.MAX_LIMIT)),
-                "select": self.CITATION_FIELDS,
-            },
-        )
+        params = {
+            "filter": filter_value,
+            "sort": self.CITATION_SORTS[sort],
+            "per-page": max(1, min(limit, self.MAX_LIMIT)),
+            "select": self.CITATION_FIELDS,
+        }
+        cache_key = request_key("GET", "/works", params)
+        if self._paper_store and (
+            cached := self._paper_store.get_pointers(cache_key, CitingPaperData)
+        ):
+            return cached
+
+        payload = self._request("GET", "/works", params=params)
 
         papers = self._absorb(
             [self._to_citing_paper(item) for item in payload.get("results") or []]
         )
         total = (payload.get("meta") or {}).get("count") or len(papers)
+        if self._paper_store:
+            self._paper_store.put_pointers(cache_key, papers, total)
         return papers, total
 
     def _search_works(
@@ -239,23 +275,31 @@ class OpenAlexClient(ApiClient):
         holds exactly one entry because the API rejects a request naming more than one of
         `search`, `search.exact` and `search.semantic`.
         """
+        params = {
+            **search_param,
+            "per-page": max(1, min(limit, max_limit)),
+            "select": self.SEARCH_FIELDS,
+        }
+        cache_key = request_key("GET", "/works", params)
+        if self._paper_store and (
+            cached := self._paper_store.get_pointers(cache_key, PaperData)
+        ):
+            papers, _ = cached
+            return papers
+
         try:
-            payload = self._request(
-                "GET",
-                "/works",
-                params={
-                    **search_param,
-                    "per-page": max(1, min(limit, max_limit)),
-                    "select": self.SEARCH_FIELDS,
-                },
-            )
+            payload = self._request("GET", "/works", params=params)
         except APIError as error:
+            # Never cached: the empty list stands in for a failure, not an answer.
             logger.error(error)
             return []
 
-        return self._absorb(
+        papers = self._absorb(
             [self._to_paper_data(item) for item in payload.get("results") or []]
         )
+        if self._paper_store:
+            self._paper_store.put_pointers(cache_key, papers)
+        return papers
 
     def _absorb(self, papers: list) -> list:
         """`papers` written into the paper store and enriched from it, if there is one."""

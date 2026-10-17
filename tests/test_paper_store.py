@@ -10,6 +10,11 @@ The contracts pinned here:
 * `absorb` never mutates its input, and a failing cache degrades to no cache.
 * `full_paper` is reached by `paper_id` or DOI, survives later merges into the record,
   and never appears on a PaperData.
+* A request is cached as pointers: its ids in order, with the per-request
+  `relevance_score` and total, rebuilt from the shared records on a hit. A pointer to
+  any missing record is a miss, and a paper without an id leaves the request uncached.
+* Authors are kept by `author_id` with their ORCID (any case) as an alias, and author
+  searches by pointer the same way.
 """
 
 import time
@@ -18,7 +23,7 @@ import diskcache
 import pytest
 
 from common import CitingPaperData, PaperData
-from services.cache import PaperStore
+from services.cache import PaperStore, request_key
 
 
 @pytest.fixture
@@ -188,3 +193,150 @@ def test_broken_cache_full_paper_degrades():
     store.put_full_paper("W1", FULL_TEXT, doi="10.1/x")
 
     assert store.get_full_paper("W1", doi="10.1/x") is None
+
+
+# --- request pointers -----------------------------------------------------------
+
+SEARCH = request_key("GET", "/works", {"search": "attention", "per-page": 10})
+LISTING = request_key("GET", "/works", {"filter": "cites:W9", "per-page": 10})
+
+
+def test_request_key_ignores_parameter_order_but_not_values():
+    assert request_key("GET", "/works", {"a": 1, "b": 2}) == request_key(
+        "get", "/works", {"b": 2, "a": 1}
+    )
+    assert request_key("GET", "/works", {"a": 1}) != request_key(
+        "GET", "/works", {"a": 2}
+    )
+    assert request_key("GET", "/works", {"a": 1}) != request_key(
+        "GET", "/authors", {"a": 1}
+    )
+
+
+def test_pointers_round_trip_in_order_with_their_scores(store):
+    papers = store.absorb([paper(paper_id="W2", relevance_score=0.9), paper()])
+
+    store.put_pointers(SEARCH, papers)
+
+    hit, total = store.get_pointers(SEARCH)
+    assert [p.paper_id for p in hit] == ["W2", "W1"]
+    assert [p.relevance_score for p in hit] == [0.9, 1.5]
+    assert hit[1] == paper()
+    assert total is None
+
+
+def test_a_record_without_a_field_rebuilds_it_blank(store):
+    store.put_pointers(SEARCH, store.absorb([paper(abstract="", license="")]))
+
+    [hit], _ = store.get_pointers(SEARCH)
+
+    assert hit.abstract == ""
+    assert hit.license == ""
+
+
+def test_requests_sharing_a_paper_share_its_record(store):
+    store.put_pointers(SEARCH, store.absorb([paper()]))
+    listed = store.absorb(
+        [CitingPaperData(**vars(paper(relevance_score=0.0)), cited_by_count=5)]
+    )
+    store.put_pointers(LISTING, listed, total=40)
+
+    store.put_summary("W1", "Attention Is All You Need", 99)
+
+    [searched], _ = store.get_pointers(SEARCH, PaperData)
+    [cited], total = store.get_pointers(LISTING, CitingPaperData)
+    assert type(searched) is PaperData
+    assert searched.relevance_score == 1.5
+    assert cited.cited_by_count == 99
+    assert total == 40
+
+
+def test_an_empty_result_is_a_hit(store):
+    store.put_pointers(SEARCH, [])
+
+    assert store.get_pointers(SEARCH) == ([], None)
+
+
+def test_an_unknown_request_is_a_miss(store):
+    assert store.get_pointers(SEARCH) is None
+
+
+def test_a_pointer_to_a_missing_record_is_a_miss(store):
+    store.put_pointers(SEARCH, [paper(), paper(paper_id="W2")])
+    store.absorb([paper()])
+
+    assert store.get_pointers(SEARCH) is None
+
+
+def test_a_paper_without_an_id_leaves_the_request_uncached(store):
+    store.put_pointers(SEARCH, store.absorb([paper(), paper(paper_id="")]))
+
+    assert store.get_pointers(SEARCH) is None
+
+
+def test_full_paper_never_lands_on_a_rebuilt_paper(store):
+    store.put_pointers(SEARCH, store.absorb([paper()]))
+    store.put_full_paper("W1", FULL_TEXT)
+
+    [hit], _ = store.get_pointers(SEARCH)
+
+    assert not hasattr(hit, "full_paper")
+
+
+def test_pointers_expire_on_their_own_ttl(tmp_path):
+    with diskcache.Cache(str(tmp_path)) as cache:
+        store = PaperStore(cache, request_ttl_seconds=0.01)
+        store.put_pointers(SEARCH, store.absorb([paper()]))
+        time.sleep(0.05)
+
+        assert store.get_pointers(SEARCH) is None
+        assert store.get("W1") is not None
+
+
+def test_work_pointer_resolves_to_its_paper_id(store):
+    key = request_key("GET", "/works/doi:10.1/x", {})
+    store.put_work_pointer(key, "W1")
+
+    assert store.get_work_pointer(key) == "W1"
+    assert store.get_work_pointer(SEARCH) is None
+
+
+def test_broken_cache_pointers_degrade():
+    store = PaperStore(BrokenCache())
+
+    store.put_pointers(SEARCH, [paper()])
+
+    assert store.get_pointers(SEARCH) is None
+
+
+# --- authors ----------------------------------------------------------------------
+
+ADA = {
+    "author_id": "A1",
+    "name": "Ada Lovelace",
+    "orcid": "0000-0002-1825-009X",
+    "institution": "University of London",
+    "works_count": 12,
+    "cited_by_count": 3400,
+}
+AUTHORS = request_key("GET", "/authors", {"search": "ada"})
+
+
+def test_author_is_found_by_id_and_orcid(store):
+    store.put_authors([ADA])
+
+    assert store.get_author("A1") == ADA
+    assert store.get_author("orcid:0000-0002-1825-009x") == ADA
+    assert store.get_author("orcid:0000-0000-0000-0000") is None
+    assert store.get_author("A404") is None
+
+
+def test_author_pointers_round_trip_and_miss_on_a_gap(store):
+    babbage = ADA | {"author_id": "A2", "name": "Charles Babbage", "orcid": ""}
+    store.put_authors([ADA])
+    store.put_author_pointers(AUTHORS, [babbage, ADA])
+
+    assert store.get_author_pointers(AUTHORS) is None
+
+    store.put_authors([babbage])
+    assert store.get_author_pointers(AUTHORS) == [babbage, ADA]
