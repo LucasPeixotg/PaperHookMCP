@@ -3,7 +3,7 @@ import logging
 
 from common import CitingPaperData, PaperData
 from config import settings
-from utils import bare_doi, bare_openalex_id
+from utils import bare_doi, bare_openalex_id, bare_orcid
 
 from .api_client import ApiClient, APIError
 
@@ -19,7 +19,8 @@ class OpenAlexClient(ApiClient):
         "abstract_inverted_index,best_oa_location,primary_location,relevance_score"
     )
 
-    # Works reached by a citation link, in either direction, are listed, not searched:
+    # Works reached by a citation link, in either direction, or by authorship are
+    # listed, not searched:
     # there is no query to rank against, so no `relevance_score`, and the abstract stays
     # off the wire because a page of up to MAX_LIMIT reconstructed abstracts is far more
     # than a caller skimming follow-ups or a bibliography needs. `cited_by_count` and the
@@ -32,6 +33,12 @@ class OpenAlexClient(ApiClient):
     # Just enough of the target work to name it in the response and hand its id to
     # the `cites:` filter, which accepts nothing but an OpenAlex id.
     WORK_SUMMARY_FIELDS = "id,display_name,cited_by_count"
+
+    # Enough to tell namesakes apart when a name matches several authors, and to name
+    # the one picked otherwise.
+    AUTHOR_FIELDS = (
+        "id,display_name,orcid,works_count,cited_by_count,last_known_institutions"
+    )
 
     CITATION_SORTS = {
         "most_cited": "cited_by_count:desc",
@@ -123,13 +130,62 @@ class OpenAlexClient(ApiClient):
         """
         return self._list_linked_works(f"cited_by:{work_id}", limit, sort)
 
+    def get_author(self, key: str) -> dict:
+        """Look up one author by OpenAlex id (`A123`) or ORCID (`orcid:0000-…`).
+
+        Raises APIError, as `get_work` does: a 404 means the caller named an author
+        OpenAlex does not know.
+        """
+        payload = self._request(
+            "GET", f"/authors/{key}", params={"select": self.AUTHOR_FIELDS}
+        )
+
+        return self._to_author_summary(payload)
+
+    def search_authors(self, name: str, limit: int = 5) -> list[dict]:
+        """The authors whose name best matches `name`, most relevant first.
+
+        Raises APIError rather than swallowing it like the work searches: an empty list
+        here reads as "no such author", which a failed request must not pass for.
+        """
+        # A blank search matches every author in OpenAlex — as for works, skip it.
+        if not name.strip():
+            return []
+
+        payload = self._request(
+            "GET",
+            "/authors",
+            params={
+                "search": name,
+                "per-page": max(1, min(limit, self.MAX_LIMIT)),
+                "select": self.AUTHOR_FIELDS,
+            },
+        )
+
+        return [self._to_author_summary(item) for item in payload.get("results") or []]
+
+    def get_author_works(
+        self, author_id: str, limit: int = 10, publication_year_min: int | None = None
+    ) -> tuple[list[CitingPaperData], int]:
+        """The works `author_id` authored, most cited first, plus how many there are.
+
+        `author_id` must be a bare OpenAlex author id — `author.id:` takes no ORCID —
+        so resolve anything else through `get_author` first. Raises APIError.
+        """
+        filter_value = f"author.id:{author_id}"
+        if publication_year_min is not None:
+            filter_value += f",publication_year:>{publication_year_min - 1}"
+
+        return self._list_linked_works(filter_value, limit, "most_cited")
+
     def _list_linked_works(
         self, filter_value: str, limit: int, sort: str
     ) -> tuple[list[CitingPaperData], int]:
-        """List the works one citation filter selects, plus how many there are in total.
+        """List the works one filter selects, plus how many there are in total.
 
-        Both directions of the citation graph share everything but the filter: the
-        endpoint, sorts, selected fields, mapping and the APIError left to propagate.
+        Both directions of the citation graph and an author's works share everything
+        but the filter: the endpoint, sorts, selected fields, mapping and the APIError
+        left to propagate.
         """
         payload = self._request(
             "GET",
@@ -218,6 +274,21 @@ class OpenAlexClient(ApiClient):
             venue=source.get("display_name") or "",
             cited_by_count=item.get("cited_by_count") or 0,
         )
+
+    @staticmethod
+    def _to_author_summary(item: dict) -> dict:
+        # A list, since an author can hold several affiliations; the first is enough
+        # to tell namesakes apart.
+        institution = next(iter(item.get("last_known_institutions") or []), None) or {}
+
+        return {
+            "author_id": bare_openalex_id(item.get("id")),
+            "name": item.get("display_name") or "",
+            "orcid": bare_orcid(item.get("orcid")),
+            "institution": institution.get("display_name") or "",
+            "works_count": item.get("works_count") or 0,
+            "cited_by_count": item.get("cited_by_count") or 0,
+        }
 
     @staticmethod
     def _abstract_from_inverted_index(index: dict | None) -> str:

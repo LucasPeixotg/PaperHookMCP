@@ -7,11 +7,20 @@ not a ToolError, so the module stays free of fastmcp; tools translate it themsel
 Also pins the two strippers sources map through: `bare_doi` and `bare_openalex_id` turn
 the URL forms OpenAlex publishes into the bare ids other APIs take back, and map a
 missing value to "" because every PaperData field is a required non-null string.
+
+`to_openalex_author_key` never raises: an OpenAlex author id or an ORCID becomes a
+`/authors/{key}` key, and anything else is None, meaning "search for it as a name".
 """
 
 import pytest
 
-from utils import bare_doi, bare_openalex_id, to_openalex_id
+from utils import (
+    bare_doi,
+    bare_openalex_id,
+    bare_orcid,
+    to_openalex_author_key,
+    to_openalex_id,
+)
 
 
 @pytest.mark.parametrize("paper_id", [
@@ -58,3 +67,36 @@ def test_bare_doi(value, bare):
 ])
 def test_bare_openalex_id(value, bare):
     assert bare_openalex_id(value) == bare
+
+
+@pytest.mark.parametrize("author, key", [
+    ("A5001234567", "A5001234567"),
+    ("a5001234567", "A5001234567"),
+    ("https://openalex.org/A5001234567", "A5001234567"),
+    ("  A5001234567  ", "A5001234567"),
+    ("0000-0002-1825-0097", "orcid:0000-0002-1825-0097"),
+    ("https://orcid.org/0000-0002-1825-0097", "orcid:0000-0002-1825-0097"),
+    ("0000-0002-1694-233x", "orcid:0000-0002-1694-233X"),
+])
+def test_author_identifiers_map_to_a_lookup_key(author, key):
+    assert to_openalex_author_key(author) == key
+
+
+@pytest.mark.parametrize("author", [
+    "Geoffrey Hinton",
+    "",
+    "W2626778328",  # a work, not an author
+    "0000-0002-1825",  # a truncated ORCID
+])
+def test_anything_else_is_a_name(author):
+    assert to_openalex_author_key(author) is None
+
+
+@pytest.mark.parametrize("value, bare", [
+    ("https://orcid.org/0000-0002-1825-0097", "0000-0002-1825-0097"),
+    ("0000-0002-1825-0097", "0000-0002-1825-0097"),
+    ("", ""),
+    (None, ""),
+])
+def test_bare_orcid(value, bare):
+    assert bare_orcid(value) == bare

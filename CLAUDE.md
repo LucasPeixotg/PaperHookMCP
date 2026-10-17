@@ -36,6 +36,8 @@ Output is JSON `{papers, relevant_without_abstract}`; `relevance_score` is strip
 
 `get_citations` (`src/tools/get_citations.py`) accepts only an OpenAlex ID (bare `W…` or `https://openalex.org/W…`; DOIs and arXiv IDs are rejected) and normalizes it with `to_openalex_id` for a `/works/{id}` lookup (in `src/utils/paper_id.py`, alongside the `bare_doi` / `bare_openalex_id` strippers the OpenAlex client maps through), then lists citing works with `filter=cites:W…`. Unlike the searches, these client methods raise `APIError`, and the tool turns it into a `ToolError`, so "paper not found" never looks like "no citations".
 
+`get_author_top_works` (`src/tools/get_author_top_works.py`) takes an OpenAlex author ID (`A…`), an ORCID, or a name; `to_openalex_author_key` (`src/utils/paper_id.py`) turns the first two into a `/authors/{key}` lookup and returns None for a name. A name is searched via `/authors` and must match exactly one author — several matches raise a `ToolError` listing the candidate IDs, since a namesake's list looks just as plausible. Works come from `filter=author.id:A…`, sorted by citations, with an optional `publication_year_min`.
+
 Key shared pieces:
 - `PaperData` (`src/common/paper_data.py`) — the record every source maps into. Semantic Scholar has no relevance score, so its papers default to 0.0 and lose ties; revisit when re-enabling it.
 - `ApiClient` (`src/services/api/api_client.py`) — base class for source clients: `x-api-key`/bearer headers, tenacity retries on network/timeout errors in `_send`, translation to `APIError` in `_request`.
