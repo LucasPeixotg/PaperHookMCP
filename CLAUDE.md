@@ -1,0 +1,46 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt          # ~2 GB: sentence-transformers pulls in torch
+cp .env.example .env
+
+python src/server.py                     # MCP server over stdio
+pytest                                   # all tests (no network)
+pytest tests/test_reranker.py            # one file
+pytest tests/test_reranker.py -k tie     # one test by name
+```
+
+Python 3.13. No linter/formatter is configured, and there is no `pyproject.toml`.
+
+## Import roots
+
+Imports are rooted at `src/` (`from config import settings`, `from common import PaperData`), not at the repo root. `python src/server.py` gets this for free; `tests/conftest.py` inserts `src/` on `sys.path` to match, and `.vscode/settings.json` adds it to Pylance. Keep new imports in that style.
+
+## Architecture
+
+FastMCP server (`src/server.py`) exposing tools. Only `find_relevant_papers` is registered; the other modules in `src/tools/` (`fetch_full_paper`, `get_citations`, etc.) are stubs that raise `ToolError("Not Yet Implemented")`, and their imports in `server.py` are commented out. No local corpus or database — every call hits public research APIs live.
+
+`find_relevant_papers` (`src/tools/find_relevant_papers/tool.py`) is a pipeline:
+1. `remove_wildcards` strips `*`/`?` (search APIs treat them as operators).
+2. OpenAlex semantic search, over-fetching `max(top_k*2, RERANK_CANDIDATE_POOL)`. OpenAlex caps this endpoint at 50 (`OpenAlexClient.SEMANTIC_MAX_LIMIT`). Semantic Scholar and OpenAlex keyword search are wired as clients but their calls are commented out in `tool.py`.
+3. `remove_duplicates` — DOI match, or fuzzy title+abstract match (rapidfuzz); a published copy beats a preprint.
+4. `rerank` (`src/services/models/reranker.py`) — cross-encoder scores against the **raw** (uncleaned) query, source `relevance_score` breaks ties.
+5. Split: top `top_k` slots go only to papers with an abstract; higher-ranked abstract-less papers are returned in `relevant_without_abstract` instead of being dropped.
+
+Output is JSON `{papers, relevant_without_abstract}`; `relevance_score` is stripped from the response because its scale differs per source and search mode.
+
+Key shared pieces:
+- `PaperData` (`src/common/paper_data.py`) — the record every source maps into. Semantic Scholar has no relevance score, so its papers default to 0.0 and lose ties; revisit when re-enabling it.
+- `ApiClient` (`src/services/api/api_client.py`) — base class for source clients: `x-api-key`/bearer headers, tenacity retries on network/timeout errors in `_send`, translation to `APIError` in `_request`.
+- `settings` (`src/config.py`) — pydantic-settings singleton; `.env` is resolved from the repo root so it works whatever cwd the MCP client uses.
+
+Side effects at import time: clients in `tool.py` and the `CrossEncoder` in `reranker.py` (module-level `_model`, downloads weights on first run) are created when the module is imported.
+
+## Tests
+
+No test touches the network. API client tests use `httpx.MockTransport`; reranker tests inject a stub scorer rather than loading the real model. Test modules open with docstrings explaining which contracts they pin — read those before changing the corresponding code.
