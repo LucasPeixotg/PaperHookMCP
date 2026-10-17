@@ -4,6 +4,10 @@ Searches and lists still go live — only the API knows which papers match a que
 every paper they return is written here, once, under its `paper_id`, with its DOI as
 an alias. The store then answers identifier lookups without a request and fills in
 what a fresh record left blank from the cached copy of the same work.
+
+A record may also carry `full_paper`, the extracted full text. It is not a PaperData
+field, so it never rides along on search results; only `put_full_paper` and
+`get_full_paper` touch it.
 """
 
 import dataclasses
@@ -52,13 +56,22 @@ class PaperStore:
 
     def find(self, paper: PaperData) -> dict | None:
         """The cached record of `paper`, by its `paper_id` and then by its DOI."""
-        if record := self.get(paper.paper_id):
-            return record
-        if not paper.doi:
-            return None
+        return self._resolve(paper.paper_id, paper.doi)
 
-        paper_id = self._safe(lambda: self._cache.get(_doi_key(paper.doi)))
-        return self.get(paper_id) if paper_id else None
+    def get_full_paper(self, paper_id: str = "", doi: str = "") -> str | None:
+        """The cached full text of the paper, by `paper_id` and then by DOI, or None."""
+        record = self._resolve(paper_id, doi)
+        return record.get("full_paper") if record else None
+
+    def put_full_paper(self, paper_id: str, full_paper: str, doi: str = "") -> None:
+        """Store the full text on the record of `paper_id`, aliased by `doi` if given."""
+        if not paper_id:
+            return
+        self._merge(paper_id, {"paper_id": paper_id, "full_paper": full_paper})
+        if doi:
+            self._safe(lambda: self._cache.set(
+                _doi_key(doi), paper_id, expire=self._ttl
+            ))
 
     def absorb(self, papers: list[PaperData]) -> list[PaperData]:
         """`papers` enriched from the store, each merged back into it.
@@ -88,6 +101,7 @@ class PaperStore:
             return paper
 
         same_record = cached.get("paper_id") == paper.paper_id
+        # `hasattr` below also keeps `full_paper`, which PaperData lacks, off the paper.
         fields = _FILLABLE_FIELDS if same_record else ("abstract",)
 
         filled = {
@@ -115,7 +129,18 @@ class PaperStore:
                 _doi_key(paper.doi), paper.paper_id, expire=self._ttl
             ))
 
+    def _resolve(self, paper_id: str, doi: str) -> dict | None:
+        if record := self.get(paper_id):
+            return record
+        if not doi:
+            return None
+
+        aliased_id = self._safe(lambda: self._cache.get(_doi_key(doi)))
+        return self.get(aliased_id) if aliased_id else None
+
     def _merge(self, paper_id: str, fresh: dict) -> None:
+        # Starts from the cached record, so fields the fresh one lacks — `full_paper`
+        # above all — survive every later absorb or summary.
         merged = dict(self.get(paper_id) or {})
         merged.update({
             key: value

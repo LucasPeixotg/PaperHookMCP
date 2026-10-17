@@ -8,6 +8,8 @@ The contracts pinned here:
 * Enrichment fills only blanks, and fresh non-blank fields win. A record reached
   through the DOI under a different `paper_id` lends its abstract and nothing else.
 * `absorb` never mutates its input, and a failing cache degrades to no cache.
+* `full_paper` is reached by `paper_id` or DOI, survives later merges into the record,
+  and never appears on a PaperData.
 """
 
 import time
@@ -142,3 +144,47 @@ def test_broken_cache_leaves_papers_unchanged():
 
     assert store.absorb(incoming) == incoming
     assert store.get("W1") is None
+
+
+FULL_TEXT = "1 Introduction\nThe dominant sequence models..."
+
+
+def test_full_paper_is_found_by_id_and_doi(store):
+    store.put_full_paper("W1", FULL_TEXT, doi="10.1000/Example.1")
+
+    assert store.get_full_paper("W1") == FULL_TEXT
+    assert store.get_full_paper(doi="10.1000/EXAMPLE.1") == FULL_TEXT
+
+
+def test_full_paper_survives_absorb_and_summary(store):
+    store.put_full_paper("W1", FULL_TEXT)
+
+    store.absorb([paper()])
+    store.put_summary("W1", "Attention Is All You Need", 100)
+
+    assert store.get_full_paper("W1") == FULL_TEXT
+
+
+def test_full_paper_never_lands_on_a_paper(store):
+    store.absorb([paper()])
+    store.put_full_paper("W1", FULL_TEXT)
+
+    [fresh] = store.absorb([paper(abstract="")])
+
+    assert not hasattr(fresh, "full_paper")
+
+
+def test_missing_full_paper_is_none(store):
+    store.absorb([paper()])
+
+    assert store.get_full_paper("W1") is None
+    assert store.get_full_paper("W404") is None
+    assert store.get_full_paper() is None
+
+
+def test_broken_cache_full_paper_degrades():
+    store = PaperStore(BrokenCache())
+
+    store.put_full_paper("W1", FULL_TEXT, doi="10.1/x")
+
+    assert store.get_full_paper("W1", doi="10.1/x") is None
