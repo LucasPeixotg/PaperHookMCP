@@ -19,10 +19,11 @@ class OpenAlexClient(ApiClient):
         "abstract_inverted_index,best_oa_location,primary_location,relevance_score"
     )
 
-    # Citing works are listed, not searched: there is no query to rank against, so no
-    # `relevance_score`, and the abstract stays off the wire because a page of up to
-    # MAX_LIMIT reconstructed abstracts is far more than a caller skimming follow-ups
-    # needs. `cited_by_count` and the location's source supply what they read instead.
+    # Works reached by a citation link, in either direction, are listed, not searched:
+    # there is no query to rank against, so no `relevance_score`, and the abstract stays
+    # off the wire because a page of up to MAX_LIMIT reconstructed abstracts is far more
+    # than a caller skimming follow-ups or a bibliography needs. `cited_by_count` and the
+    # location's source supply what they read instead.
     CITATION_FIELDS = (
         "id,doi,display_name,publication_year,"
         "best_oa_location,primary_location,cited_by_count"
@@ -109,11 +110,32 @@ class OpenAlexClient(ApiClient):
         `work_id` must be a bare OpenAlex id — `cites:` takes no DOI — so resolve
         anything else through `get_work` first. Raises APIError, as `get_work` does.
         """
+        return self._list_linked_works(f"cites:{work_id}", limit, sort)
+
+    def get_referenced_works(
+        self, work_id: str, limit: int = 10, sort: str = "most_cited"
+    ) -> tuple[list[CitingPaperData], int]:
+        """The works `work_id` cites (its reference list), plus how many there are.
+
+        The mirror of `get_citing_works`: `cited_by:` lists the entries of the work's
+        `referenced_works`, and likewise takes nothing but a bare OpenAlex id. Raises
+        APIError, as `get_work` does.
+        """
+        return self._list_linked_works(f"cited_by:{work_id}", limit, sort)
+
+    def _list_linked_works(
+        self, filter_value: str, limit: int, sort: str
+    ) -> tuple[list[CitingPaperData], int]:
+        """List the works one citation filter selects, plus how many there are in total.
+
+        Both directions of the citation graph share everything but the filter: the
+        endpoint, sorts, selected fields, mapping and the APIError left to propagate.
+        """
         payload = self._request(
             "GET",
             "/works",
             params={
-                "filter": f"cites:{work_id}",
+                "filter": filter_value,
                 "sort": self.CITATION_SORTS[sort],
                 "per-page": max(1, min(limit, self.MAX_LIMIT)),
                 "select": self.CITATION_FIELDS,

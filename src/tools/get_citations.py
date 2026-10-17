@@ -13,7 +13,7 @@ open_alex_client = OpenAlexClient()
 
 # Fields that are ranking or reading material elsewhere but noise in a citation list:
 # no query ranked these works, and abstracts are not fetched for them.
-_DROPPED_FIELDS = {"abstract", "relevance_score"}
+_DROPPED_FIELDS = {"relevance_score"}
 
 
 def get_citations(
