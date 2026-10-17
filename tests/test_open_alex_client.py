@@ -18,7 +18,7 @@ import httpx
 import pytest
 from tenacity import wait_none
 
-from common import PaperData
+from common import CitingPaperData, PaperData
 from config import settings
 from services.api.api_client import ApiClient, APIError
 from services.api.open_alex_client import OpenAlexClient
@@ -653,3 +653,134 @@ def test_context_manager_closes_the_client(monkeypatch):
         assert not client._client.is_closed
 
     assert client._client.is_closed
+
+
+# --- citations ----------------------------------------------------------------
+#
+# Unlike the searches, `get_work` and `get_citing_works` raise APIError rather than
+# swallowing it: get_citations turns a 404 into a "paper not found" the caller sees.
+
+
+def citing(**overrides) -> dict:
+    base = {
+        "id": "https://openalex.org/W3000000001",
+        "doi": "https://doi.org/10.1000/follow-up",
+        "display_name": "A Follow-up",
+        "publication_year": 2021,
+        "best_oa_location": None,
+        "primary_location": {
+            **location(landing_page_url="https://example.test/paper"),
+            "source": {"display_name": "NeurIPS"},
+        },
+        "cited_by_count": 42,
+    }
+    return base | overrides
+
+
+def citing_page(*items, count=None) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={"meta": {"count": len(items) if count is None else count},
+              "results": list(items)},
+    )
+
+
+def test_citing_works_filter_on_the_target(monkeypatch):
+    handler, calls = recorder(citing_page())
+    client = make_client(monkeypatch, handler)
+
+    client.get_citing_works("W2626778328")
+
+    (request,) = calls
+    assert request.url.path == "/openalex/works"
+    assert request.url.params["filter"] == "cites:W2626778328"
+    assert request.url.params["select"] == OpenAlexClient.CITATION_FIELDS
+    assert "search" not in request.url.params
+
+
+@pytest.mark.parametrize("sort, sent", [
+    ("most_cited", "cited_by_count:desc"),
+    ("newest", "publication_date:desc"),
+])
+def test_citing_works_sort_is_translated(monkeypatch, sort, sent):
+    handler, calls = recorder(citing_page())
+    client = make_client(monkeypatch, handler)
+
+    client.get_citing_works("W1", sort=sort)
+
+    assert calls[0].url.params["sort"] == sent
+
+
+@pytest.mark.parametrize("limit, sent", [(0, 1), (10, 10), (500, MAX_LIMIT)])
+def test_citing_works_limit_is_clamped(monkeypatch, limit, sent):
+    handler, calls = recorder(citing_page())
+    client = make_client(monkeypatch, handler)
+
+    client.get_citing_works("W1", limit=limit)
+
+    assert calls[0].url.params["per-page"] == str(sent)
+
+
+def test_citing_works_map_venue_and_count_and_return_the_total(monkeypatch):
+    handler, _ = recorder(citing_page(citing(), count=1234))
+    client = make_client(monkeypatch, handler)
+
+    papers, total = client.get_citing_works("W1")
+
+    assert total == 1234
+    assert papers == [CitingPaperData(
+        paper_id="W3000000001",
+        doi="10.1000/follow-up",
+        title="A Follow-up",
+        year=2021,
+        abstract="",
+        url="https://example.test/paper",
+        license="",
+        venue="NeurIPS",
+        cited_by_count=42,
+    )]
+
+
+@pytest.mark.parametrize("primary", [None, location(), {**location(), "source": None}])
+def test_a_missing_source_leaves_the_venue_empty(primary):
+    paper = OpenAlexClient._to_citing_paper(
+        citing(primary_location=primary, cited_by_count=None)
+    )
+
+    assert paper.venue == ""
+    assert paper.cited_by_count == 0
+
+
+def test_citing_works_raise_on_http_error(monkeypatch):
+    handler, _ = recorder(httpx.Response(503, text="busy"))
+    client = make_client(monkeypatch, handler)
+
+    with pytest.raises(APIError, match="503"):
+        client.get_citing_works("W1")
+
+
+def test_get_work_resolves_an_external_id(monkeypatch):
+    handler, calls = recorder(httpx.Response(200, json={
+        "id": "https://openalex.org/W2626778328",
+        "display_name": "Attention Is All You Need",
+        "cited_by_count": 100000,
+    }))
+    client = make_client(monkeypatch, handler)
+
+    work = client.get_work("doi:10.48550/arXiv.1706.03762")
+
+    assert calls[0].url.path == "/openalex/works/doi:10.48550/arXiv.1706.03762"
+    assert calls[0].url.params["select"] == OpenAlexClient.WORK_SUMMARY_FIELDS
+    assert work == {
+        "paper_id": "W2626778328",
+        "title": "Attention Is All You Need",
+        "cited_by_count": 100000,
+    }
+
+
+def test_get_work_raises_on_404(monkeypatch):
+    handler, _ = recorder(httpx.Response(404, text="not found"))
+    client = make_client(monkeypatch, handler)
+
+    with pytest.raises(APIError, match="404"):
+        client.get_work("W0")

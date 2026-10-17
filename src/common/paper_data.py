@@ -18,3 +18,12 @@ class PaperData:
     # per-source and per-search-mode and are not comparable: OpenAlex keyword scores
     # run into the thousands, semantic ones sit around 1.
     relevance_score: float = 0.0
+
+
+@dataclass
+class CitingPaperData(PaperData):
+    # A paper found by following a citation link rather than by a search, so it
+    # carries the two fields a caller uses to judge a follow-up study without
+    # reading it: where it appeared and how much it was picked up in turn.
+    venue: str = ""
+    cited_by_count: int = 0

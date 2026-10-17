@@ -23,7 +23,7 @@ Imports are rooted at `src/` (`from config import settings`, `from common import
 
 ## Architecture
 
-FastMCP server (`src/server.py`) exposing tools. Only `find_relevant_papers` is registered; the other modules in `src/tools/` (`fetch_full_paper`, `get_citations`, etc.) are stubs that raise `ToolError("Not Yet Implemented")`, and their imports in `server.py` are commented out. No local corpus or database — every call hits public research APIs live.
+FastMCP server (`src/server.py`) exposing tools. `find_relevant_papers` and `get_citations` are registered; the other modules in `src/tools/` (`fetch_full_paper`, `get_references`, etc.) are stubs that raise `ToolError("Not Yet Implemented")`, and their imports in `server.py` are commented out. No local corpus or database — every call hits public research APIs live.
 
 `find_relevant_papers` (`src/tools/find_relevant_papers/tool.py`) is a pipeline:
 1. `remove_wildcards` strips `*`/`?` (search APIs treat them as operators).
@@ -33,6 +33,8 @@ FastMCP server (`src/server.py`) exposing tools. Only `find_relevant_papers` is 
 5. Split: top `top_k` slots go only to papers with an abstract; higher-ranked abstract-less papers are returned in `relevant_without_abstract` instead of being dropped.
 
 Output is JSON `{papers, relevant_without_abstract}`; `relevance_score` is stripped from the response because its scale differs per source and search mode.
+
+`get_citations` (`src/tools/get_citations.py`) accepts only an OpenAlex ID (bare `W…` or `https://openalex.org/W…`; DOIs and arXiv IDs are rejected) and normalizes it with `to_openalex_id` for a `/works/{id}` lookup (in `src/utils/paper_id.py`, alongside the `bare_doi` / `bare_openalex_id` strippers the OpenAlex client maps through), then lists citing works with `filter=cites:W…`. Unlike the searches, these client methods raise `APIError`, and the tool turns it into a `ToolError`, so "paper not found" never looks like "no citations".
 
 Key shared pieces:
 - `PaperData` (`src/common/paper_data.py`) — the record every source maps into. Semantic Scholar has no relevance score, so its papers default to 0.0 and lose ties; revisit when re-enabling it.
