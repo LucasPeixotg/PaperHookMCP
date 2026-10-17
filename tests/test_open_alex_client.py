@@ -798,3 +798,131 @@ def test_get_work_raises_on_404(monkeypatch):
 
     with pytest.raises(APIError, match="404"):
         client.get_work("W0")
+
+
+# --- authors ------------------------------------------------------------------
+#
+# Like the citation lookups, these raise APIError: the tool must tell "no such author"
+# apart from a failed request, and turns a name matching several authors into an error.
+
+def author(**overrides) -> dict:
+    base = {
+        "id": "https://openalex.org/A5001234567",
+        "display_name": "Ada Lovelace",
+        "orcid": "https://orcid.org/0000-0002-1825-0097",
+        "works_count": 12,
+        "cited_by_count": 3400,
+        "last_known_institutions": [
+            {"display_name": "University of London"},
+            {"display_name": "Somewhere Else"},
+        ],
+    }
+    return base | overrides
+
+
+ADA = {
+    "author_id": "A5001234567",
+    "name": "Ada Lovelace",
+    "orcid": "0000-0002-1825-0097",
+    "institution": "University of London",
+    "works_count": 12,
+    "cited_by_count": 3400,
+}
+
+
+def test_get_author_resolves_an_orcid(monkeypatch):
+    handler, calls = recorder(httpx.Response(200, json=author()))
+    client = make_client(monkeypatch, handler)
+
+    found = client.get_author("orcid:0000-0002-1825-0097")
+
+    assert calls[0].url.path == "/openalex/authors/orcid:0000-0002-1825-0097"
+    assert calls[0].url.params["select"] == OpenAlexClient.AUTHOR_FIELDS
+    assert found == ADA
+
+
+def test_get_author_raises_on_404(monkeypatch):
+    handler, _ = recorder(httpx.Response(404, text="not found"))
+    client = make_client(monkeypatch, handler)
+
+    with pytest.raises(APIError, match="404"):
+        client.get_author("A0")
+
+
+@pytest.mark.parametrize("institutions", [None, [], [None]])
+def test_a_missing_institution_or_orcid_is_empty(institutions):
+    found = OpenAlexClient._to_author_summary(
+        author(orcid=None, last_known_institutions=institutions,
+               works_count=None, cited_by_count=None)
+    )
+
+    assert found["orcid"] == ""
+    assert found["institution"] == ""
+    assert found["works_count"] == 0
+    assert found["cited_by_count"] == 0
+
+
+def test_search_authors_hits_the_authors_endpoint(monkeypatch):
+    handler, calls = recorder(ok(author(), author(id="https://openalex.org/A2")))
+    client = make_client(monkeypatch, handler)
+
+    found = client.search_authors("Ada Lovelace", limit=3)
+
+    (request,) = calls
+    assert request.url.path == "/openalex/authors"
+    assert request.url.params["search"] == "Ada Lovelace"
+    assert request.url.params["per-page"] == "3"
+    assert request.url.params["select"] == OpenAlexClient.AUTHOR_FIELDS
+    assert [a["author_id"] for a in found] == ["A5001234567", "A2"]
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_blank_author_name_makes_no_request(monkeypatch, name):
+    handler, calls = recorder(ok())
+    client = make_client(monkeypatch, handler)
+
+    assert client.search_authors(name) == []
+    assert calls == []
+
+
+def test_search_authors_raises_on_http_error(monkeypatch):
+    handler, _ = recorder(httpx.Response(503, text="busy"))
+    client = make_client(monkeypatch, handler)
+
+    with pytest.raises(APIError, match="503"):
+        client.search_authors("Ada Lovelace")
+
+
+@pytest.mark.parametrize("year_min, sent", [
+    (None, "author.id:A1"),
+    (2020, "author.id:A1,publication_year:>2019"),
+])
+def test_author_works_filter_on_the_author(monkeypatch, year_min, sent):
+    handler, calls = recorder(citing_page())
+    client = make_client(monkeypatch, handler)
+
+    client.get_author_works("A1", publication_year_min=year_min)
+
+    (request,) = calls
+    assert request.url.path == "/openalex/works"
+    assert request.url.params["filter"] == sent
+    assert request.url.params["sort"] == "cited_by_count:desc"
+    assert request.url.params["select"] == OpenAlexClient.CITATION_FIELDS
+
+
+@pytest.mark.parametrize("limit, sent", [(0, 1), (10, 10), (500, MAX_LIMIT)])
+def test_author_works_limit_is_clamped(monkeypatch, limit, sent):
+    handler, calls = recorder(citing_page())
+    client = make_client(monkeypatch, handler)
+
+    client.get_author_works("A1", limit=limit)
+
+    assert calls[0].url.params["per-page"] == str(sent)
+
+
+def test_author_works_raise_on_http_error(monkeypatch):
+    handler, _ = recorder(httpx.Response(503, text="busy"))
+    client = make_client(monkeypatch, handler)
+
+    with pytest.raises(APIError, match="503"):
+        client.get_author_works("A1")
