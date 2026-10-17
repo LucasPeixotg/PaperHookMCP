@@ -1,7 +1,9 @@
+import dataclasses
 import logging
 
-from common import PaperData
+from common import CitingPaperData, PaperData
 from config import settings
+from utils import bare_doi, bare_openalex_id
 
 from .api_client import ApiClient, APIError
 
@@ -17,6 +19,24 @@ class OpenAlexClient(ApiClient):
         "abstract_inverted_index,best_oa_location,primary_location,relevance_score"
     )
 
+    # Citing works are listed, not searched: there is no query to rank against, so no
+    # `relevance_score`, and the abstract stays off the wire because a page of up to
+    # MAX_LIMIT reconstructed abstracts is far more than a caller skimming follow-ups
+    # needs. `cited_by_count` and the location's source supply what they read instead.
+    CITATION_FIELDS = (
+        "id,doi,display_name,publication_year,"
+        "best_oa_location,primary_location,cited_by_count"
+    )
+
+    # Just enough of the target work to name it in the response and hand its id to
+    # the `cites:` filter, which accepts nothing but an OpenAlex id.
+    WORK_SUMMARY_FIELDS = "id,display_name,cited_by_count"
+
+    CITATION_SORTS = {
+        "most_cited": "cited_by_count:desc",
+        "newest": "publication_date:desc",
+    }
+
     # The API rejects a per-page outside 1..200 with a "Pagination error". Note that
     # OpenAlex's own LLM quick reference claims a maximum of 100; that is stale — 200
     # is what the endpoint actually serves, and what its rejection message names.
@@ -25,12 +45,6 @@ class OpenAlexClient(ApiClient):
     # Semantic search runs against a vector index rather than the inverted one, and caps
     # far lower than the keyword endpoint's 200.
     SEMANTIC_MAX_LIMIT = 50
-
-    # OpenAlex publishes DOIs in resolver-URL form; the bare identifier is what the
-    # other APIs take back, so the prefix comes off in `_bare_doi`. Note the `url`
-    # fallback in `_to_paper_data` deliberately keeps the URL form — there the DOI is a
-    # link, not an identifier.
-    DOI_URL_PREFIX = "https://doi.org/"
 
     # Only the first 2000 characters are embedded; the rest is dropped server-side, so
     # there is no reason to put it on the wire.
@@ -69,6 +83,46 @@ class OpenAlexClient(ApiClient):
             limit,
             self.SEMANTIC_MAX_LIMIT,
         )
+
+    def get_work(self, key: str) -> dict:
+        """Look up one work by OpenAlex id (`W123`) or external id (`doi:10.x/...`).
+
+        Unlike the searches this raises APIError instead of swallowing it: a 404 here
+        means the caller named a paper OpenAlex does not know, which is an answer they
+        need to hear, not an empty result to paper over.
+        """
+        payload = self._request(
+            "GET", f"/works/{key}", params={"select": self.WORK_SUMMARY_FIELDS}
+        )
+
+        return {
+            "paper_id": bare_openalex_id(payload.get("id")),
+            "title": payload.get("display_name") or "",
+            "cited_by_count": payload.get("cited_by_count") or 0,
+        }
+
+    def get_citing_works(
+        self, work_id: str, limit: int = 10, sort: str = "most_cited"
+    ) -> tuple[list[CitingPaperData], int]:
+        """The works citing `work_id`, plus how many there are in total.
+
+        `work_id` must be a bare OpenAlex id — `cites:` takes no DOI — so resolve
+        anything else through `get_work` first. Raises APIError, as `get_work` does.
+        """
+        payload = self._request(
+            "GET",
+            "/works",
+            params={
+                "filter": f"cites:{work_id}",
+                "sort": self.CITATION_SORTS[sort],
+                "per-page": max(1, min(limit, self.MAX_LIMIT)),
+                "select": self.CITATION_FIELDS,
+            },
+        )
+
+        papers = [self._to_citing_paper(item) for item in payload.get("results") or []]
+        total = (payload.get("meta") or {}).get("count") or len(papers)
+        return papers, total
 
     def _search_works(
         self, search_param: dict, limit: int, max_limit: int
@@ -113,14 +167,14 @@ class OpenAlexClient(ApiClient):
                 license_ = location.get("license") or ""
                 break
         else:
+            # Deliberately the resolver-URL form: here the DOI is a link, not an id.
             url = item.get("doi") or ""
 
-        # `id` is a URL ("https://openalex.org/W2626778328"); callers want the bare id.
-        openalex_id = item.get("id") or ""
-
         return PaperData(
-            paper_id=openalex_id.rsplit("/", 1)[-1],
-            doi=OpenAlexClient._bare_doi(item.get("doi")),
+            # Both published as URLs ("https://openalex.org/W2626778328"); callers
+            # want the bare identifiers.
+            paper_id=bare_openalex_id(item.get("id")),
+            doi=bare_doi(item.get("doi")),
             title=item.get("display_name") or "",
             year=item.get("publication_year") or 0,
             abstract=OpenAlexClient._abstract_from_inverted_index(
@@ -134,11 +188,14 @@ class OpenAlexClient(ApiClient):
         )
 
     @staticmethod
-    def _bare_doi(value: str | None) -> str:
-        if not value:
-            return ""
+    def _to_citing_paper(item: dict) -> CitingPaperData:
+        source = (item.get("primary_location") or {}).get("source") or {}
 
-        return value.removeprefix(OpenAlexClient.DOI_URL_PREFIX)
+        return CitingPaperData(
+            **dataclasses.asdict(OpenAlexClient._to_paper_data(item)),
+            venue=source.get("display_name") or "",
+            cited_by_count=item.get("cited_by_count") or 0,
+        )
 
     @staticmethod
     def _abstract_from_inverted_index(index: dict | None) -> str:
