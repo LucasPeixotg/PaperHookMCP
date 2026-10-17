@@ -657,8 +657,14 @@ def test_context_manager_closes_the_client(monkeypatch):
 
 # --- citations ----------------------------------------------------------------
 #
-# Unlike the searches, `get_work` and `get_citing_works` raise APIError rather than
-# swallowing it: get_citations turns a 404 into a "paper not found" the caller sees.
+# Unlike the searches, `get_work`, `get_citing_works` and `get_referenced_works` raise
+# APIError rather than swallowing it: the tools turn a 404 into a "paper not found" the
+# caller sees. The two listing directions differ only in their filter, so the shared
+# behaviour is pinned once for both.
+
+LISTINGS = pytest.mark.parametrize(
+    "listing", ["get_citing_works", "get_referenced_works"]
+)
 
 
 def citing(**overrides) -> dict:
@@ -685,15 +691,19 @@ def citing_page(*items, count=None) -> httpx.Response:
     )
 
 
-def test_citing_works_filter_on_the_target(monkeypatch):
+@pytest.mark.parametrize("listing, sent", [
+    ("get_citing_works", "cites:W2626778328"),
+    ("get_referenced_works", "cited_by:W2626778328"),
+])
+def test_linked_works_filter_on_the_target(monkeypatch, listing, sent):
     handler, calls = recorder(citing_page())
     client = make_client(monkeypatch, handler)
 
-    client.get_citing_works("W2626778328")
+    getattr(client, listing)("W2626778328")
 
     (request,) = calls
     assert request.url.path == "/openalex/works"
-    assert request.url.params["filter"] == "cites:W2626778328"
+    assert request.url.params["filter"] == sent
     assert request.url.params["select"] == OpenAlexClient.CITATION_FIELDS
     assert "search" not in request.url.params
 
@@ -702,30 +712,33 @@ def test_citing_works_filter_on_the_target(monkeypatch):
     ("most_cited", "cited_by_count:desc"),
     ("newest", "publication_date:desc"),
 ])
-def test_citing_works_sort_is_translated(monkeypatch, sort, sent):
+@LISTINGS
+def test_linked_works_sort_is_translated(monkeypatch, listing, sort, sent):
     handler, calls = recorder(citing_page())
     client = make_client(monkeypatch, handler)
 
-    client.get_citing_works("W1", sort=sort)
+    getattr(client, listing)("W1", sort=sort)
 
     assert calls[0].url.params["sort"] == sent
 
 
 @pytest.mark.parametrize("limit, sent", [(0, 1), (10, 10), (500, MAX_LIMIT)])
-def test_citing_works_limit_is_clamped(monkeypatch, limit, sent):
+@LISTINGS
+def test_linked_works_limit_is_clamped(monkeypatch, listing, limit, sent):
     handler, calls = recorder(citing_page())
     client = make_client(monkeypatch, handler)
 
-    client.get_citing_works("W1", limit=limit)
+    getattr(client, listing)("W1", limit=limit)
 
     assert calls[0].url.params["per-page"] == str(sent)
 
 
-def test_citing_works_map_venue_and_count_and_return_the_total(monkeypatch):
+@LISTINGS
+def test_linked_works_map_venue_and_count_and_return_the_total(monkeypatch, listing):
     handler, _ = recorder(citing_page(citing(), count=1234))
     client = make_client(monkeypatch, handler)
 
-    papers, total = client.get_citing_works("W1")
+    papers, total = getattr(client, listing)("W1")
 
     assert total == 1234
     assert papers == [CitingPaperData(
@@ -751,12 +764,13 @@ def test_a_missing_source_leaves_the_venue_empty(primary):
     assert paper.cited_by_count == 0
 
 
-def test_citing_works_raise_on_http_error(monkeypatch):
+@LISTINGS
+def test_linked_works_raise_on_http_error(monkeypatch, listing):
     handler, _ = recorder(httpx.Response(503, text="busy"))
     client = make_client(monkeypatch, handler)
 
     with pytest.raises(APIError, match="503"):
-        client.get_citing_works("W1")
+        getattr(client, listing)("W1")
 
 
 def test_get_work_resolves_an_external_id(monkeypatch):
