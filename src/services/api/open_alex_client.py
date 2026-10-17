@@ -3,11 +3,15 @@ import logging
 
 from common import CitingPaperData, PaperData
 from config import settings
+from services.cache import PaperStore, get_paper_store
 from utils import bare_doi, bare_openalex_id, bare_orcid
 
 from .api_client import ApiClient, APIError
 
 logger = logging.getLogger(__name__)
+
+# Tells "use the process-wide store" apart from an explicit None, which means none.
+_DEFAULT_STORE = object()
 
 class OpenAlexClient(ApiClient):
     # Fields requested via `select` — the OpenAlex counterpart of Semantic Scholar's
@@ -58,11 +62,15 @@ class OpenAlexClient(ApiClient):
     # there is no reason to put it on the wire.
     SEMANTIC_MAX_QUERY_CHARS = 2000
 
-    def __init__(self, timeout = 10):
+    def __init__(self, timeout = 10, paper_store: PaperStore | None = _DEFAULT_STORE):
         base_url = settings.OPENALEX_API_BASE_URL
         bearer_token = settings.OPENALEX_API_TOKEN
 
         super().__init__(base_url, timeout=timeout, bearer_token=bearer_token)
+
+        self._paper_store = (
+            get_paper_store() if paper_store is _DEFAULT_STORE else paper_store
+        )
 
     def search_papers(self, query: str, limit: int = 10) -> list[PaperData]:
         # Unlike Semantic Scholar, a blank search is a 200 here — it just matches every
@@ -98,16 +106,32 @@ class OpenAlexClient(ApiClient):
         Unlike the searches this raises APIError instead of swallowing it: a 404 here
         means the caller named a paper OpenAlex does not know, which is an answer they
         need to hear, not an empty result to paper over.
+
+        A bare `W…` already in the paper store, with a title and a citation count, is
+        answered from there without a request. An external id always goes live, since
+        the store cannot tell which work it names until OpenAlex says.
         """
+        if self._paper_store and not key.startswith("doi:"):
+            cached = self._paper_store.get(key)
+            if cached and cached.get("title") and "cited_by_count" in cached:
+                return {
+                    "paper_id": cached["paper_id"],
+                    "title": cached["title"],
+                    "cited_by_count": cached["cited_by_count"],
+                }
+
         payload = self._request(
             "GET", f"/works/{key}", params={"select": self.WORK_SUMMARY_FIELDS}
         )
 
-        return {
+        work = {
             "paper_id": bare_openalex_id(payload.get("id")),
             "title": payload.get("display_name") or "",
             "cited_by_count": payload.get("cited_by_count") or 0,
         }
+        if self._paper_store:
+            self._paper_store.put_summary(**work)
+        return work
 
     def get_citing_works(
         self, work_id: str, limit: int = 10, sort: str = "most_cited"
@@ -198,7 +222,9 @@ class OpenAlexClient(ApiClient):
             },
         )
 
-        papers = [self._to_citing_paper(item) for item in payload.get("results") or []]
+        papers = self._absorb(
+            [self._to_citing_paper(item) for item in payload.get("results") or []]
+        )
         total = (payload.get("meta") or {}).get("count") or len(papers)
         return papers, total
 
@@ -227,7 +253,13 @@ class OpenAlexClient(ApiClient):
             logger.error(error)
             return []
 
-        return [self._to_paper_data(item) for item in payload.get("results") or []]
+        return self._absorb(
+            [self._to_paper_data(item) for item in payload.get("results") or []]
+        )
+
+    def _absorb(self, papers: list) -> list:
+        """`papers` written into the paper store and enriched from it, if there is one."""
+        return self._paper_store.absorb(papers) if self._paper_store else papers
 
     @staticmethod
     def _to_paper_data(item: dict) -> PaperData:

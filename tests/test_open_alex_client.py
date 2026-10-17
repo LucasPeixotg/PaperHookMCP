@@ -14,6 +14,7 @@ truncation) name their method directly.
 import json
 import logging
 
+import diskcache
 import httpx
 import pytest
 from tenacity import wait_none
@@ -22,6 +23,7 @@ from common import CitingPaperData, PaperData
 from config import settings
 from services.api.api_client import ApiClient, APIError
 from services.api.open_alex_client import OpenAlexClient
+from services.cache import PaperStore
 
 # Deliberately not the real host: a test that somehow escapes the mock should fail
 # loudly rather than quietly querying OpenAlex.
@@ -926,3 +928,83 @@ def test_author_works_raise_on_http_error(monkeypatch):
 
     with pytest.raises(APIError, match="503"):
         client.get_author_works("A1")
+
+
+# --- paper store ----------------------------------------------------------------
+#
+# Every client above runs without a store (conftest switches it off). These hand the
+# client one under tmp_path and pin how the client reads it: identifier lookups are
+# answered from it, and fresh records are enriched from it.
+
+@pytest.fixture
+def paper_store(tmp_path):
+    cache = diskcache.Cache(str(tmp_path))
+    yield PaperStore(cache)
+    cache.close()
+
+
+def make_cached_client(monkeypatch, handler, paper_store):
+    client = make_client(monkeypatch, handler)
+    client._paper_store = paper_store
+    return client
+
+
+def test_get_work_is_answered_from_the_store_the_second_time(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(200, json={
+        "id": "https://openalex.org/W1", "display_name": "A", "cited_by_count": 3,
+    }))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    first = client.get_work("W1")
+    second = client.get_work("W1")
+
+    assert first == second == {"paper_id": "W1", "title": "A", "cited_by_count": 3}
+    assert len(calls) == 1
+
+
+def test_get_work_uses_a_paper_seen_in_a_citation_list(monkeypatch, paper_store):
+    handler, calls = recorder(ok(item(id="https://openalex.org/W1", cited_by_count=7)))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.get_citing_works("W9")
+    work = client.get_work("W1")
+
+    assert work == {"paper_id": "W1", "title": "Attention Is All You Need",
+                    "cited_by_count": 7}
+    assert len(calls) == 1
+
+
+def test_get_work_skips_the_store_for_a_search_hit_without_a_count(
+    monkeypatch, paper_store
+):
+    """A search does not select `cited_by_count`, so its record cannot answer."""
+    handler, calls = recorder(
+        ok(item()),
+        httpx.Response(200, json={"id": "https://openalex.org/W2626778328",
+                                  "display_name": "Attention Is All You Need",
+                                  "cited_by_count": 9}),
+    )
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.semantic_search_papers("attention")
+    client.get_work("W2626778328")
+
+    assert len(calls) == 2
+
+
+def test_search_hit_without_abstract_is_enriched_from_the_store(monkeypatch, paper_store):
+    handler, _ = recorder(ok(item()), ok(item(abstract_inverted_index=None)))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.semantic_search_papers("attention")
+    [paper] = client.semantic_search_papers("attention again")
+
+    assert paper.abstract == PLAIN_ABSTRACT
+
+
+def test_failed_search_writes_nothing(monkeypatch, paper_store):
+    handler, _ = recorder(httpx.Response(503, text="down"))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    assert client.semantic_search_papers("attention") == []
+    assert paper_store.get("W2626778328") is None

@@ -1,3 +1,5 @@
+# The per-paper store in src/services/cache/paper_store.py.
+diskcache==5.6.3
 fastmcp==4.0.3
 httpx==0.28.1
 pydantic==2.13.5

@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     # semantic endpoint there and `_search_works` clamps the request to it.
     RERANK_CANDIDATE_POOL: int = 40
 
+    # CACHE
+
+    # The per-paper store in src/services/cache/paper_store.py: every paper a search
+    # or listing returns, keyed by `paper_id` with its DOI as an alias. Anchored to
+    # the repo root for the same reason as `.env` below; `.data/` is gitignored.
+    CACHE_ENABLED: bool = True
+    CACHE_DIR: Path = ROOT_DIR / ".data" / "paper_cache"
+    # Citation counts and URLs drift, so records expire rather than live forever.
+    CACHE_TTL_SECONDS: int = 30 * 24 * 3600
+    CACHE_SIZE_LIMIT_MB: int = 512
+
     model_config = SettingsConfigDict(
         # Anchored to the repo root so the same config works from any working
         # directory — an MCP client launches src/server.py with a cwd of its own.
