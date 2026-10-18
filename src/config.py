@@ -41,12 +41,16 @@ class Settings(BaseSettings):
     # CACHE
 
     # The per-paper store in src/services/cache/paper_store.py: every paper a search
-    # or listing returns, keyed by `paper_id` with its DOI as an alias. Anchored to
-    # the repo root for the same reason as `.env` below; `.data/` is gitignored.
+    # or listing returns, keyed by `paper_id` with its DOI as an alias, and every
+    # request as a list of pointers to those records. Anchored to the repo root for
+    # the same reason as `.env` below; `.data/` is gitignored.
     CACHE_ENABLED: bool = True
     CACHE_DIR: Path = ROOT_DIR / ".data" / "paper_cache"
     # Citation counts and URLs drift, so records expire rather than live forever.
     CACHE_TTL_SECONDS: int = 30 * 24 * 3600
+    # Which papers a query or listing returns drifts faster than any one paper, so a
+    # request's pointers expire well before the records they point at.
+    REQUEST_CACHE_TTL_SECONDS: int = 24 * 3600
     CACHE_SIZE_LIMIT_MB: int = 512
 
     model_config = SettingsConfigDict(
