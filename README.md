@@ -61,8 +61,9 @@ carry on without it. Set `CACHE_ENABLED=false` to turn it off.
 ## Requirements
 
 - Python 3.13
-- ~2 GB of disk for dependencies (`sentence-transformers` pulls in PyTorch), plus a
-  one-time download of the cross-encoder weights on first run.
+- ~1 GB of disk for dependencies (`sentence-transformers` pulls in PyTorch, installed
+  as the CPU-only build), plus a one-time download of the cross-encoder weights on
+  first run.
 
 ## Install and run
 
@@ -84,7 +85,7 @@ register it with an MCP client and `uvx` fetches and runs it, no checkout needed
 ```
 
 Settings (see [Configuration](#configuration)) go in `env`. The first launch
-downloads ~2 GB of dependencies plus the cross-encoder weights, which can outlast a
+downloads ~1 GB of dependencies plus the cross-encoder weights, which can outlast a
 client's startup timeout. To pay that cost up front, install it as a tool once and
 point the client at the installed command instead:
 
@@ -99,9 +100,19 @@ uv tool install git+https://github.com/LucasPeixotg/PaperWeightMCP
 ### From a checkout
 
 ```bash
-uv sync --extra dev                # or: python -m venv venv && pip install -e ".[dev]"
+uv sync --extra dev                # or, with pip (see below): pip install -e ".[dev]"
 cp .env.example .env
 uv run paperhook-mcp               # or: python -m paperhook.server
+```
+
+uv takes torch from PyTorch's CPU-only index (`[tool.uv.sources]` in `pyproject.toml`).
+pip ignores that, and on Linux would install the CUDA build (~4 GB more), so install
+torch first:
+
+```bash
+python -m venv venv && source venv/bin/activate
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -e ".[dev]"
 ```
 
 ## Tools

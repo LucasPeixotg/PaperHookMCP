@@ -24,10 +24,12 @@ dependencies = [
     # The cross-encoder that reorders search candidates against the query in
     # paperhook/services/models/reranker.py, and downloads its weights on first
     # use. Pulls in torch and transformers, which are most of the install's
-    # footprint (~2GB against the ~30MB of everything above); neither is
-    # imported directly, so neither is pinned here.
+    # footprint; neither is imported directly, so neither is pinned here.
     "sentence-transformers==6.0.1",
     "tenacity==9.1.4",
+    # Listed only so [tool.uv.sources] can point it at the CPU-only index: the
+    # reranker never uses a GPU, and the default Linux wheel adds ~4GB of CUDA.
+    "torch>=2.4",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +42,16 @@ paperhook-mcp = "paperhook.server:main"
 
 [project.urls]
 Repository = "https://github.com/LucasPeixotg/PaperWeightMCP"
+
+# uv only; pip ignores this and needs --index-url (see README).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+# Only packages pinned to it above come from here; everything else from PyPI.
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["paperhook"]

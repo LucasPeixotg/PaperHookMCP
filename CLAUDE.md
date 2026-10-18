@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 python -m venv venv && source venv/bin/activate
-pip install -e ".[dev]"                  # ~2 GB: sentence-transformers pulls in torch
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # CPU-only; pip ignores [tool.uv.sources]
+pip install -e ".[dev]"                  # ~1 GB: sentence-transformers pulls in torch
 cp .env.example .env
 
 paperhook-mcp                            # MCP server over stdio (or: python -m paperhook.server)
@@ -16,7 +17,7 @@ pytest tests/test_reranker.py            # one file
 pytest tests/test_reranker.py -k tie     # one test by name
 ```
 
-Python 3.13. No linter/formatter is configured. `pyproject.toml` (hatchling) is the single source of dependencies and defines the `paperhook-mcp` console script (`paperhook.server:main`).
+Python 3.13. No linter/formatter is configured. `pyproject.toml` (hatchling) is the single source of dependencies and defines the `paperhook-mcp` console script (`paperhook.server:main`). torch is a direct dependency only so `[tool.uv.sources]` can pin it to the PyTorch CPU index (uv, uvx and git installs honor it; pip needs the `--index-url` line above).
 
 ## Package layout
 

@@ -24,9 +24,9 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      # The default Linux torch wheel pulls several GB of CUDA libraries; the
-      # tests never touch a GPU, and sentence-transformers accepts whichever
-      # torch is already installed.
+      # The default Linux torch wheel pulls several GB of CUDA libraries. uv
+      # installs get the CPU-only build from [tool.uv.sources] in pyproject.toml,
+      # but pip ignores that, so torch is installed from the CPU index first.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
