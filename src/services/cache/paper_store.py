@@ -36,7 +36,9 @@ _UNCACHED_FIELDS = {"relevance_score"}
 # Filled from the cache when the fresh record has them blank. `cited_by_count` is
 # absent on purpose: a listing that carries it always selected it, so its 0 is a
 # real count, not a gap.
-_FILLABLE_FIELDS = ("doi", "title", "year", "abstract", "url", "license", "venue")
+_FILLABLE_FIELDS = (
+    "doi", "title", "year", "abstract", "url", "license", "oa_pdf", "oa_url", "venue"
+)
 
 
 def _is_blank(value) -> bool:
@@ -62,7 +64,8 @@ def _orcid_key(orcid: str) -> str:
 
 # What a rebuilt paper takes for a field its record lacks: `_merge` drops blank values,
 # so a paper stored without an abstract comes back with no `abstract` key at all.
-_BLANKS = {"doi": "", "title": "", "year": 0, "abstract": "", "url": "", "license": ""}
+_BLANKS = {"doi": "", "title": "", "year": 0, "abstract": "", "url": "", "license": "",
+           "oa_pdf": "", "oa_url": ""}
 
 
 def request_key(method: str, endpoint: str, params: dict) -> str:

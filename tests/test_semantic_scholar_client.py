@@ -237,6 +237,8 @@ def test_open_access_pdf_wins_over_the_landing_page():
 
     assert paper.url == "https://arxiv.org/pdf/1706.03762"
     assert paper.license == "CCBY"
+    assert paper.oa_pdf == "https://arxiv.org/pdf/1706.03762"
+    assert paper.oa_url == ""
 
 
 @pytest.mark.parametrize("open_access", [None, {}, {"url": None, "license": None}])
@@ -245,6 +247,7 @@ def test_landing_page_is_the_fallback_url(open_access):
 
     assert paper.url == "https://www.semanticscholar.org/paper/p1"
     assert paper.license == ""
+    assert paper.oa_pdf == ""
 
 
 def test_url_is_empty_when_neither_is_offered():

@@ -307,7 +307,7 @@ class OpenAlexClient(ApiClient):
 
     @staticmethod
     def _to_paper_data(item: dict) -> PaperData:
-        # Every field is nullable while PaperData requires all seven, so each value is
+        # Every field is nullable while PaperData requires them, so each value is
         # coerced to its empty equivalent.
         best = item.get("best_oa_location") or {}
         primary = item.get("primary_location") or {}
@@ -336,6 +336,10 @@ class OpenAlexClient(ApiClient):
             ),
             url=url,
             license=license_,
+            # From the open-access location alone: `url` may fall back to the
+            # publisher's, which is no use for reading the full text.
+            oa_pdf=best.get("pdf_url") or "",
+            oa_url=best.get("landing_page_url") or "",
             # Absent on any request carrying no search parameter, and null-able even
             # when present; both mean "this source did not rank this record".
             relevance_score=float(item.get("relevance_score") or 0.0),

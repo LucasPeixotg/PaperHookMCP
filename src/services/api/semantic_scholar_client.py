@@ -43,8 +43,8 @@ class SemanticScholarClient(ApiClient):
 
     @staticmethod
     def _to_paper_data(item: dict) -> PaperData:
-        # Every field is nullable in a search response, while PaperData requires all
-        # seven, so each value is coerced to its empty equivalent.
+        # Every field is nullable in a search response, while PaperData requires
+        # its fields, so each value is coerced to its empty equivalent.
         open_access = item.get("openAccessPdf") or {}
 
         # The Graph API has no top-level doi; it lives under externalIds, keyed
@@ -59,4 +59,6 @@ class SemanticScholarClient(ApiClient):
             abstract=item.get("abstract") or "",
             url=open_access.get("url") or item.get("url") or "",
             license=open_access.get("license") or "",
+            # The Graph API publishes only a PDF link for the open-access copy.
+            oa_pdf=open_access.get("url") or "",
         )

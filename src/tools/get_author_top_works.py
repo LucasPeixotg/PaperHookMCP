@@ -38,7 +38,8 @@ def get_author_top_works(
     Returns:
         JSON list of the author's publications, most cited first, each with its
         paper ID, DOI, title, publication year, venue, citation count, direct
-        paper URL and license.
+        paper URL, license, and open-access links (`oa_pdf`, a direct PDF,
+        and `oa_url`, a landing page; blank when there is none).
     """
     author_id = _resolve_author(author)
 

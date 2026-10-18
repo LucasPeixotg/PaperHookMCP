@@ -34,7 +34,9 @@ def get_citations(
 
     Returns:
         JSON list of the citing papers, each with its paper ID, DOI, title,
-        publication year, venue, citation count, direct paper URL and license.
+        publication year, venue, citation count, direct paper URL, license,
+        and open-access links (`oa_pdf`, a direct PDF, and `oa_url`, a landing
+        page; blank when there is none).
         The target paper itself is not included.
     """
     try:

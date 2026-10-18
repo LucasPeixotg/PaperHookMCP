@@ -332,6 +332,7 @@ def test_maps_a_full_record_to_paper_data(monkeypatch, search):
             abstract=PLAIN_ABSTRACT,
             url="https://arxiv.org/pdf/1706.03762",
             license="cc-by",
+            oa_pdf="https://arxiv.org/pdf/1706.03762",
             relevance_score=1.2024246507243719,
         )
     ]
@@ -512,6 +513,54 @@ def test_a_null_license_coerces_to_empty():
 
     assert paper.url == "https://arxiv.org/pdf/1901.00596"
     assert paper.license == ""
+
+
+# --- the open-access links ----------------------------------------------------
+
+
+def test_open_access_links_come_from_the_oa_location():
+    """Both are kept, unlike `url`: a landing page is the fallback when the PDF fails."""
+    paper = OpenAlexClient._to_paper_data(
+        item(
+            best_oa_location=location(
+                pdf_url="https://arxiv.org/pdf/1706.03762",
+                landing_page_url="http://arxiv.org/abs/1706.03762",
+            ),
+            primary_location=location(
+                pdf_url="https://publisher.test/paywalled.pdf",
+                landing_page_url="https://publisher.test/article",
+            ),
+        )
+    )
+
+    assert paper.oa_pdf == "https://arxiv.org/pdf/1706.03762"
+    assert paper.oa_url == "http://arxiv.org/abs/1706.03762"
+
+
+def test_an_oa_location_without_a_pdf_leaves_oa_pdf_empty():
+    paper = OpenAlexClient._to_paper_data(
+        item(best_oa_location=location(landing_page_url="https://figshare.test/article/1"))
+    )
+
+    assert paper.oa_pdf == ""
+    assert paper.oa_url == "https://figshare.test/article/1"
+
+
+@pytest.mark.parametrize("best", [None, {}, location()])
+def test_the_primary_location_never_supplies_open_access_links(best):
+    """`url` may fall back to the publisher's copy; these must not, it may be paywalled."""
+    paper = OpenAlexClient._to_paper_data(
+        item(
+            best_oa_location=best,
+            primary_location=location(
+                pdf_url="https://publisher.test/paywalled.pdf",
+                landing_page_url="https://publisher.test/article",
+            ),
+        )
+    )
+
+    assert paper.url == "https://publisher.test/paywalled.pdf"
+    assert (paper.oa_pdf, paper.oa_url) == ("", "")
 
 
 # --- reconstructing the abstract ----------------------------------------------
