@@ -53,7 +53,9 @@ class StubClient:
             raise self.referenced_error
         paper = CitingPaperData(
             paper_id="W0", doi="10.1/x", title="Prior Work", year=2015, abstract="",
-            url="https://example.test", license="cc-by", relevance_score=0.0,
+            url="https://example.test", license="cc-by",
+            oa_pdf="https://example.test/oa.pdf", oa_url="https://example.test/oa",
+            relevance_score=0.0,
             venue="NeurIPS", cited_by_count=900,
         )
         return [paper], 30
@@ -81,6 +83,7 @@ def test_response_shape(stub):
     assert result == [{
         "paper_id": "W0", "doi": "10.1/x", "title": "Prior Work", "year": 2015,
         "url": "https://example.test", "license": "cc-by",
+        "oa_pdf": "https://example.test/oa.pdf", "oa_url": "https://example.test/oa",
         "venue": "NeurIPS", "cited_by_count": 900,
     }]
 

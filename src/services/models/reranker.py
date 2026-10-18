@@ -52,7 +52,7 @@ def rerank(query: str, papers: list[PaperData], top_k: int) -> RerankedPapers:
     candidates. Hence the two stages: OpenAlex narrows millions to a pool, this
     reorders the pool.
 
-    Both scored fields can be empty — ``PaperData`` requires all seven fields,
+    Both scored fields can be empty — ``PaperData`` requires its text fields,
     so both clients coerce an absent value to ``""``, and OpenAlex ships a null
     ``abstract_inverted_index`` often enough to matter. A paper missing one
     field is still scored on the other; a paper missing both scores as the empty

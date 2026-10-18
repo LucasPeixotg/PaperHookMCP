@@ -332,6 +332,7 @@ def test_maps_a_full_record_to_paper_data(monkeypatch, search):
             abstract=PLAIN_ABSTRACT,
             url="https://arxiv.org/pdf/1706.03762",
             license="cc-by",
+            oa_pdf="https://arxiv.org/pdf/1706.03762",
             relevance_score=1.2024246507243719,
         )
     ]
@@ -512,6 +513,54 @@ def test_a_null_license_coerces_to_empty():
 
     assert paper.url == "https://arxiv.org/pdf/1901.00596"
     assert paper.license == ""
+
+
+# --- the open-access links ----------------------------------------------------
+
+
+def test_open_access_links_come_from_the_oa_location():
+    """Both are kept, unlike `url`: a landing page is the fallback when the PDF fails."""
+    paper = OpenAlexClient._to_paper_data(
+        item(
+            best_oa_location=location(
+                pdf_url="https://arxiv.org/pdf/1706.03762",
+                landing_page_url="http://arxiv.org/abs/1706.03762",
+            ),
+            primary_location=location(
+                pdf_url="https://publisher.test/paywalled.pdf",
+                landing_page_url="https://publisher.test/article",
+            ),
+        )
+    )
+
+    assert paper.oa_pdf == "https://arxiv.org/pdf/1706.03762"
+    assert paper.oa_url == "http://arxiv.org/abs/1706.03762"
+
+
+def test_an_oa_location_without_a_pdf_leaves_oa_pdf_empty():
+    paper = OpenAlexClient._to_paper_data(
+        item(best_oa_location=location(landing_page_url="https://figshare.test/article/1"))
+    )
+
+    assert paper.oa_pdf == ""
+    assert paper.oa_url == "https://figshare.test/article/1"
+
+
+@pytest.mark.parametrize("best", [None, {}, location()])
+def test_the_primary_location_never_supplies_open_access_links(best):
+    """`url` may fall back to the publisher's copy; these must not, it may be paywalled."""
+    paper = OpenAlexClient._to_paper_data(
+        item(
+            best_oa_location=best,
+            primary_location=location(
+                pdf_url="https://publisher.test/paywalled.pdf",
+                landing_page_url="https://publisher.test/article",
+            ),
+        )
+    )
+
+    assert paper.url == "https://publisher.test/paywalled.pdf"
+    assert (paper.oa_pdf, paper.oa_url) == ("", "")
 
 
 # --- reconstructing the abstract ----------------------------------------------
@@ -800,6 +849,30 @@ def test_get_work_raises_on_404(monkeypatch):
 
     with pytest.raises(APIError, match="404"):
         client.get_work("W0")
+
+
+def test_get_paper_maps_the_full_record_with_its_oa_links(monkeypatch):
+    best = location(pdf_url="https://oa.test/p.pdf", landing_page_url="https://oa.test/p")
+    handler, calls = recorder(httpx.Response(200, json=item(best_oa_location=best)))
+    client = make_client(monkeypatch, handler)
+
+    paper = client.get_paper("W2626778328")
+
+    assert calls[0].url.path == "/openalex/works/W2626778328"
+    assert calls[0].url.params["select"] == OpenAlexClient.PAPER_FIELDS
+    assert "relevance_score" not in OpenAlexClient.PAPER_FIELDS
+    assert paper.paper_id == "W2626778328"
+    assert paper.title == "Attention Is All You Need"
+    assert paper.oa_pdf == "https://oa.test/p.pdf"
+    assert paper.oa_url == "https://oa.test/p"
+
+
+def test_get_paper_raises_on_404(monkeypatch):
+    handler, _ = recorder(httpx.Response(404, text="not found"))
+    client = make_client(monkeypatch, handler)
+
+    with pytest.raises(APIError, match="404"):
+        client.get_paper("W0")
 
 
 # --- authors ------------------------------------------------------------------
@@ -1160,4 +1233,52 @@ def test_a_failed_author_lookup_is_not_cached(monkeypatch, paper_store):
     with pytest.raises(APIError):
         client.get_author("A5001234567")
     assert client.get_author("A5001234567") == ADA
+    assert len(calls) == 2
+
+
+def test_get_paper_uses_a_record_with_an_oa_pdf(monkeypatch, paper_store):
+    best = location(pdf_url="https://oa.test/p.pdf")
+    handler, calls = recorder(ok(item(best_oa_location=best)))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.semantic_search_papers("attention")
+    paper = client.get_paper("W2626778328")
+
+    assert paper.oa_pdf == "https://oa.test/p.pdf"
+    assert paper.abstract == PLAIN_ABSTRACT
+    assert paper.relevance_score == 0.0
+    assert len(calls) == 1
+
+
+def test_get_paper_asks_about_a_record_without_an_oa_pdf(monkeypatch, paper_store):
+    """A listing's record without a PDF is not this lookup's answer, so it is sent."""
+    handler, calls = recorder(ok(item()), httpx.Response(200, json=item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.semantic_search_papers("attention")
+    client.get_paper("W2626778328")
+
+    assert len(calls) == 2
+
+
+def test_get_paper_without_an_oa_pdf_is_asked_once(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(200, json=item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    first = client.get_paper("W2626778328")
+    second = client.get_paper("W2626778328")
+
+    assert first.oa_pdf == second.oa_pdf == ""
+    assert second.title == "Attention Is All You Need"
+    assert len(calls) == 1
+
+
+def test_a_failed_get_paper_is_not_cached(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(500, text="boom"),
+                              httpx.Response(200, json=item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    with pytest.raises(APIError):
+        client.get_paper("W2626778328")
+    assert client.get_paper("W2626778328").title == "Attention Is All You Need"
     assert len(calls) == 2

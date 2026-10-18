@@ -36,7 +36,9 @@ _UNCACHED_FIELDS = {"relevance_score"}
 # Filled from the cache when the fresh record has them blank. `cited_by_count` is
 # absent on purpose: a listing that carries it always selected it, so its 0 is a
 # real count, not a gap.
-_FILLABLE_FIELDS = ("doi", "title", "year", "abstract", "url", "license", "venue")
+_FILLABLE_FIELDS = (
+    "doi", "title", "year", "abstract", "url", "license", "oa_pdf", "oa_url", "venue"
+)
 
 
 def _is_blank(value) -> bool:
@@ -62,7 +64,8 @@ def _orcid_key(orcid: str) -> str:
 
 # What a rebuilt paper takes for a field its record lacks: `_merge` drops blank values,
 # so a paper stored without an abstract comes back with no `abstract` key at all.
-_BLANKS = {"doi": "", "title": "", "year": 0, "abstract": "", "url": "", "license": ""}
+_BLANKS = {"doi": "", "title": "", "year": 0, "abstract": "", "url": "", "license": "",
+           "oa_pdf": "", "oa_url": ""}
 
 
 def request_key(method: str, endpoint: str, params: dict) -> str:
@@ -94,6 +97,20 @@ class PaperStore:
         if not paper_id:
             return None
         return self._safe(lambda: self._cache.get(_paper_key(paper_id)))
+
+    def get_paper(
+        self, paper_id: str, cls: type[PaperData] = PaperData, relevance_score: float = 0.0
+    ) -> PaperData | None:
+        """The cached record for `paper_id` rebuilt as `cls`, or None."""
+        record = self.get(paper_id)
+        if record is None:
+            return None
+
+        names = {field.name for field in dataclasses.fields(cls)}
+        # Filtering on `cls`'s fields keeps `full_paper` off, and the listing fields
+        # off a plain PaperData.
+        fields = {key: value for key, value in record.items() if key in names}
+        return cls(**(_BLANKS | fields), relevance_score=relevance_score)
 
     def find(self, paper: PaperData) -> dict | None:
         """The cached record of `paper`, by its `paper_id` and then by its DOI."""
@@ -165,16 +182,12 @@ class PaperStore:
         if entry is None:
             return None
 
-        names = {field.name for field in dataclasses.fields(cls)}
         papers = []
         for paper_id, score in entry["items"]:
-            record = self.get(paper_id)
-            if record is None:
+            paper = self.get_paper(paper_id, cls, relevance_score=score)
+            if paper is None:
                 return None
-            # Filtering on `cls`'s fields keeps `full_paper` off, and the listing
-            # fields off a plain PaperData.
-            fields = {key: value for key, value in record.items() if key in names}
-            papers.append(cls(**(_BLANKS | fields), relevance_score=score))
+            papers.append(paper)
         return papers, entry.get("total")
 
     def put_work_pointer(self, request_key: str, paper_id: str) -> None:

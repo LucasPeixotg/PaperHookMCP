@@ -10,6 +10,12 @@ class PaperData:
     abstract: str
     url: str
     license: str
+    # Links to the open-access copy only, never a publisher's possibly paywalled one,
+    # for fetching the full text: `oa_pdf` is a direct PDF, `oa_url` the copy's
+    # landing page. Blank means the source knows of no such link. Defaulted so a
+    # source that publishes neither need not pass them.
+    oa_pdf: str = ""
+    oa_url: str = ""
     # The source's own relevance ranking for the query that produced this record,
     # where it publishes one. Defaulted because Semantic Scholar does not, which
     # leaves its papers at 0.0 and losing every tie against an OpenAlex one —

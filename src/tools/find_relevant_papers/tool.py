@@ -15,7 +15,7 @@ open_alex_client = OpenAlexClient()
 # `relevance_score` is a ranking input, not an answer. Its scale is per-source and
 # per-search-mode — OpenAlex keyword scores run into the thousands where its semantic
 # ones sit around 1 — so a caller could only misread it. Dropping it keeps the returned
-# object the seven fields the docstring promises, and keeps both lists the same shape.
+# object the fields the docstring promises, and keeps both lists the same shape.
 _DROPPED_FIELDS = {"relevance_score"}
 
 def find_relevant_papers(query: str, top_k: int = 5) -> str:
@@ -29,7 +29,8 @@ def find_relevant_papers(query: str, top_k: int = 5) -> str:
     Returns:
         JSON string containing an object with two lists of papers, each paper
         carrying its paper ID, DOI, title, publication year, abstract, direct
-        paper URL and license.
+        paper URL, license, and open-access links (`oa_pdf`, a direct PDF,
+        and `oa_url`, a landing page; blank when there is none).
 
         `papers` holds up to top_k matches that come with an abstract — the ones
         worth reading now.

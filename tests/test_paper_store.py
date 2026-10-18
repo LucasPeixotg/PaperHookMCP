@@ -42,6 +42,8 @@ def paper(**overrides) -> PaperData:
         abstract="The dominant sequence models",
         url="https://example.test/w1.pdf",
         license="cc-by",
+        oa_pdf="https://example.test/w1-oa.pdf",
+        oa_url="https://example.test/w1-oa",
         relevance_score=1.5,
     )
     return PaperData(**(base | overrides))
@@ -61,9 +63,12 @@ def test_absorbed_paper_is_found_by_id_and_doi_without_its_score(store):
 def test_same_id_fills_blanks_and_fresh_fields_win(store):
     store.absorb([paper()])
 
-    [fresh] = store.absorb([paper(abstract="", url="https://example.test/new.pdf")])
+    [fresh] = store.absorb(
+        [paper(abstract="", oa_pdf="", url="https://example.test/new.pdf")]
+    )
 
     assert fresh.abstract == "The dominant sequence models"
+    assert fresh.oa_pdf == "https://example.test/w1-oa.pdf"
     assert fresh.url == "https://example.test/new.pdf"
     assert store.get("W1")["url"] == "https://example.test/new.pdf"
     assert store.get("W1")["abstract"] == "The dominant sequence models"
@@ -80,11 +85,13 @@ def test_relevance_score_is_passed_through(store):
 def test_doi_match_under_another_id_lends_only_the_abstract(store):
     store.absorb([paper()])
 
-    [other] = store.absorb([paper(paper_id="W2", abstract="", url="", license="")])
+    [other] = store.absorb([paper(paper_id="W2", abstract="", url="", license="",
+                                  oa_pdf="", oa_url="")])
 
     assert other.abstract == "The dominant sequence models"
     assert other.url == ""
     assert other.license == ""
+    assert (other.oa_pdf, other.oa_url) == ("", "")
 
 
 def test_title_alone_does_not_enrich(store):
@@ -226,12 +233,13 @@ def test_pointers_round_trip_in_order_with_their_scores(store):
 
 
 def test_a_record_without_a_field_rebuilds_it_blank(store):
-    store.put_pointers(SEARCH, store.absorb([paper(abstract="", license="")]))
+    store.put_pointers(SEARCH, store.absorb([paper(abstract="", license="", oa_url="")]))
 
     [hit], _ = store.get_pointers(SEARCH)
 
     assert hit.abstract == ""
     assert hit.license == ""
+    assert hit.oa_url == ""
 
 
 def test_requests_sharing_a_paper_share_its_record(store):
