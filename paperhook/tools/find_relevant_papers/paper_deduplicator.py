@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from rapidfuzz import fuzz
 from rapidfuzz.utils import default_process
 
-from common import PaperData
+from ...common import PaperData
 
 # Two records of one work are never byte-identical across sources: OpenAlex rebuilds
 # its abstract from an inverted index and loses the original spacing, Semantic Scholar

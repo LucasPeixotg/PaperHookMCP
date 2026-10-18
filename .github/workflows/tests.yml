@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: pyproject.toml
 
       # The default Linux torch wheel pulls several GB of CUDA libraries; the
       # tests never touch a GPU, and sentence-transformers accepts whichever
@@ -31,9 +31,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt
+          pip install -e ".[dev]"
 
-      # src/services/models/reranker.py builds the CrossEncoder at import time,
+      # paperhook/services/models/reranker.py builds the CrossEncoder at import time,
       # so importing it in tests/test_reranker.py downloads the weights even
       # though every test then stubs the model out.
       - name: Cache HuggingFace model

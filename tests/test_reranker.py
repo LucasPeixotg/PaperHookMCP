@@ -24,9 +24,9 @@ that a stray separator would be the normal case, not the edge one.
 
 import pytest
 
-from common import PaperData
-from services.models import reranker
-from services.models.reranker import RerankedPapers, rerank
+from paperhook.common import PaperData
+from paperhook.services.models import reranker
+from paperhook.services.models.reranker import RerankedPapers, rerank
 
 ABSTRACT = (
     "We propose a new simple network architecture, the Transformer, based solely "

@@ -14,12 +14,12 @@ import diskcache
 import pytest
 from fastmcp.exceptions import ToolError
 
-from common import PaperData
-from services.api.api_client import APIError
-from services.cache import PaperStore
+from paperhook.common import PaperData
+from paperhook.services.api.api_client import APIError
+from paperhook.services.cache import PaperStore
 
 # `tools.fetch_full_paper` the attribute is the function, so the module is fetched by name.
-module = importlib.import_module("tools.fetch_full_paper")
+module = importlib.import_module("paperhook.tools.fetch_full_paper")
 
 PDF_URL = "https://oa.example.test/paper.pdf"
 

@@ -1,10 +1,10 @@
 import dataclasses
 import logging
 
-from common import CitingPaperData, PaperData
-from config import settings
-from services.cache import PaperStore, get_paper_store, request_key
-from utils import bare_doi, bare_openalex_id, bare_orcid
+from ...common import CitingPaperData, PaperData
+from ...config import settings
+from ..cache import PaperStore, get_paper_store, request_key
+from ...utils import bare_doi, bare_openalex_id, bare_orcid
 
 from .api_client import ApiClient, APIError
 

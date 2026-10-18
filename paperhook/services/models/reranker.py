@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 
 from sentence_transformers import CrossEncoder
 
-from common import PaperData
-from config import settings
+from ...common import PaperData
+from ...config import settings
 
 logger = logging.getLogger(__name__)
 

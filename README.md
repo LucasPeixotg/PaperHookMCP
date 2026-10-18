@@ -18,7 +18,7 @@ stay cheap.
 ## How it works
 
 A call to `find_relevant_papers` runs one pipeline
-(`src/tools/find_relevant_papers/tool.py`):
+(`paperhook/tools/find_relevant_papers/tool.py`):
 
 1. **Clean the query** — `*` and `?` are stripped, since search APIs read them as
    wildcard operators rather than as language.
@@ -50,8 +50,8 @@ OpenAlex, with no reranking:
 
 ### Caching
 
-Every paper the tools see is stored on disk (diskcache, at `.data/paper_cache/`, which
-is gitignored), keyed by `paper_id` with its DOI as an alias. Each API request is cached
+Every paper the tools see is stored on disk (diskcache, at `~/.cache/paperhook/paper_cache/`,
+or under `$XDG_CACHE_HOME` when set), keyed by `paper_id` with its DOI as an alias. Each API request is cached
 separately as a list of pointers to those records, so a paper shared by several queries
 is stored once and stays consistent across them. Records expire after 30 days and request
 pointers after one day, because which papers a query returns drifts faster than any one
@@ -64,31 +64,44 @@ carry on without it. Set `CACHE_ENABLED=false` to turn it off.
 - ~2 GB of disk for dependencies (`sentence-transformers` pulls in PyTorch), plus a
   one-time download of the cross-encoder weights on first run.
 
-## Install
+## Install and run
 
-```bash
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-## Run
-
-```bash
-python src/server.py
-```
-
-The server speaks MCP over stdio. To register it with an MCP client:
+The server speaks MCP over stdio. With [uv](https://docs.astral.sh/uv/) installed,
+register it with an MCP client and `uvx` fetches and runs it, no checkout needed:
 
 ```json
 {
   "mcpServers": {
     "paperhook": {
-      "command": "/absolute/path/to/PaperHookMCP/venv/bin/python",
-      "args": ["/absolute/path/to/PaperHookMCP/src/server.py"]
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/LucasPeixotg/PaperHookMCP", "paperhook-mcp"],
+      "env": {
+        "OPENALEX_API_TOKEN": ""
+      }
     }
   }
 }
+```
+
+Settings (see [Configuration](#configuration)) go in `env`. The first launch
+downloads ~2 GB of dependencies plus the cross-encoder weights, which can outlast a
+client's startup timeout. To pay that cost up front, install it as a tool once and
+point the client at the installed command instead:
+
+```bash
+uv tool install git+https://github.com/LucasPeixotg/PaperWeightMCP
+```
+
+```json
+{ "mcpServers": { "paperhook": { "command": "paperhook-mcp" } } }
+```
+
+### From a checkout
+
+```bash
+uv sync --extra dev                # or: python -m venv venv && pip install -e ".[dev]"
+cp .env.example .env
+uv run paperhook-mcp               # or: python -m paperhook.server
 ```
 
 ## Tools
@@ -139,8 +152,8 @@ may be shorter than the paper's printed bibliography.
 
 ## Configuration
 
-Settings live in `src/config.py` and can be overridden through the environment or
-the `.env` file at the repo root. Both API tokens are optional — they only raise
+Settings live in `paperhook/config.py` and can be overridden through the environment
+(the MCP client's `env` block) or, in a checkout, the `.env` file at the repo root. Both API tokens are optional — they only raise
 rate limits and daily budgets.
 
 | Variable | Default | Purpose |
@@ -152,7 +165,7 @@ rate limits and daily budgets.
 | `RERANK_MODEL_ID` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder used for reranking |
 | `RERANK_CANDIDATE_POOL` | `40` | Candidates to rerank; the cost knob — one forward pass each. Past 50 buys nothing, since OpenAlex caps its semantic endpoint there. |
 | `CACHE_ENABLED` | `true` | Turns the disk cache on or off |
-| `CACHE_DIR` | `.data/paper_cache` | Where the cache lives, relative to the repo root |
+| `CACHE_DIR` | `~/.cache/paperhook/paper_cache` | Where the cache lives (`$XDG_CACHE_HOME/paperhook/paper_cache` when that is set) |
 | `CACHE_TTL_SECONDS` | `2592000` (30 days) | How long a paper record is kept |
 | `REQUEST_CACHE_TTL_SECONDS` | `86400` (1 day) | How long a cached request's result list is kept |
 | `CACHE_SIZE_LIMIT_MB` | `512` | Size cap for the cache on disk |
@@ -160,8 +173,9 @@ rate limits and daily budgets.
 ## Layout
 
 ```
-src/
-  server.py                        FastMCP instance and tool registration
+pyproject.toml                     Package metadata, dependencies, `paperhook-mcp` entry point
+paperhook/
+  server.py                        FastMCP instance, tool registration, `main()`
   config.py                        Settings, loaded from the environment or .env
   common/paper_data.py             PaperData — the record every source maps into
   services/
@@ -190,9 +204,9 @@ tests/
 pytest
 ```
 
-There is no `pyproject.toml`; imports are rooted at `src/`, and `tests/conftest.py`
-puts that directory on `sys.path` to reproduce what running `python src/server.py`
-does. No test touches the network — the API client suites drive `httpx.MockTransport`,
+Modules inside `paperhook/` import each other relatively; tests import
+`paperhook.…` absolutely, and pytest's `pythonpath` (in `pyproject.toml`) puts the repo
+root on `sys.path`, so the suite runs with or without the package installed. No test touches the network — the API client suites drive `httpx.MockTransport`,
 and the reranker suite stubs the cross-encoder out.
 
 ## Status

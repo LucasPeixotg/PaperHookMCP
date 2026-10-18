@@ -2,9 +2,9 @@ import json
 
 from fastmcp.exceptions import ToolError
 
-from services.api import OpenAlexClient
-from services.api.api_client import APIError
-from utils import as_response_dict, to_openalex_author_key
+from ..services.api import OpenAlexClient
+from ..services.api.api_client import APIError
+from ..utils import as_response_dict, to_openalex_author_key
 
 open_alex_client = OpenAlexClient()
 

@@ -3,9 +3,9 @@ from typing import Literal
 
 from fastmcp.exceptions import ToolError
 
-from services.api import OpenAlexClient
-from services.api.api_client import APIError
-from utils import as_response_dict, to_openalex_id
+from ..services.api import OpenAlexClient
+from ..services.api.api_client import APIError
+from ..utils import as_response_dict, to_openalex_id
 
 open_alex_client = OpenAlexClient()
 

@@ -10,8 +10,8 @@ import pymupdf
 import pytest
 from tenacity import wait_none
 
-from services.api.api_client import ApiClient, APIError
-from services.fulltext import PdfClient, extract_text
+from paperhook.services.api.api_client import ApiClient, APIError
+from paperhook.services.fulltext import PdfClient, extract_text
 
 URL = "https://oa.example.test/paper.pdf"
 

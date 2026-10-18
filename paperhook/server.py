@@ -2,7 +2,7 @@ from fastmcp import FastMCP
 
 # from tools.fetch.fetch_paper_artifacts import fetch_paper_artifacts
 # from tools.metadata.query_paper_metadata import query_paper_metadata
-from tools import (
+from .tools import (
     fetch_full_paper,
     find_relevant_papers,
     get_author_top_works,
@@ -21,5 +21,10 @@ mcp.add_tool(get_citations)
 mcp.add_tool(get_references)
 mcp.add_tool(find_relevant_papers)
 
-if __name__ == "__main__":
+def main():
+    """Console entry point (`paperhook-mcp`): serve MCP over stdio."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

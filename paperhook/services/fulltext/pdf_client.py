@@ -7,7 +7,7 @@ corrupt file the same way it reports a failed API request.
 import httpx
 import pymupdf
 
-from services.api.api_client import ApiClient, APIError
+from ..api.api_client import ApiClient, APIError
 
 
 class PdfClient(ApiClient):

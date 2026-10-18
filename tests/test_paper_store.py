@@ -22,8 +22,8 @@ import time
 import diskcache
 import pytest
 
-from common import CitingPaperData, PaperData
-from services.cache import PaperStore, request_key
+from paperhook.common import CitingPaperData, PaperData
+from paperhook.services.cache import PaperStore, request_key
 
 
 @pytest.fixture

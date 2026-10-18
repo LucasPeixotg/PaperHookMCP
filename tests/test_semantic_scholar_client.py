@@ -13,10 +13,10 @@ import httpx
 import pytest
 from tenacity import wait_none
 
-from common import PaperData
-from config import settings
-from services.api.api_client import APIError, ApiClient
-from services.api.semantic_scholar_client import SemanticScholarClient
+from paperhook.common import PaperData
+from paperhook.config import settings
+from paperhook.services.api.api_client import APIError, ApiClient
+from paperhook.services.api.semantic_scholar_client import SemanticScholarClient
 
 # Deliberately not the real host: a test that somehow escapes the mock should fail
 # loudly rather than quietly querying Semantic Scholar.

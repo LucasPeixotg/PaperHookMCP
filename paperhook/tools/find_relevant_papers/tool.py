@@ -1,10 +1,10 @@
 import json
 
-from common import PaperData
-from config import settings
-from services.api import OpenAlexClient, SemanticScholarClient
-from services.models import rerank
-from utils import as_response_dict
+from ...common import PaperData
+from ...config import settings
+from ...services.api import OpenAlexClient, SemanticScholarClient
+from ...services.models import rerank
+from ...utils import as_response_dict
 
 from .paper_deduplicator import remove_duplicates
 from .query_cleaner import remove_wildcards

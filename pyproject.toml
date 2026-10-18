@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "paperhook-mcp"
+version = "0.1.0"
+description = "MCP server that finds, reranks and follows academic papers via public research APIs"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = [
+    # The per-paper store in paperhook/services/cache/paper_store.py.
+    "diskcache==5.6.3",
+    "fastmcp==4.0.3",
+    "httpx==0.28.1",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    # PDF text extraction for fetch_full_paper
+    # (paperhook/services/fulltext/pdf_client.py). AGPL-3.0 licensed.
+    "pymupdf==1.28.2",
+    "rapidfuzz==3.14.6",
+    # The cross-encoder that reorders search candidates against the query in
+    # paperhook/services/models/reranker.py, and downloads its weights on first
+    # use. Pulls in torch and transformers, which are most of the install's
+    # footprint (~2GB against the ~30MB of everything above); neither is
+    # imported directly, so neither is pinned here.
+    "sentence-transformers==6.0.1",
+    "tenacity==9.1.4",
+]
+
+[project.optional-dependencies]
+# Unit tests (tests/); httpx.MockTransport, which stands in for the network
+# there, ships with httpx itself.
+dev = ["pytest>=8"]
+
+[project.scripts]
+paperhook-mcp = "paperhook.server:main"
+
+[project.urls]
+Repository = "https://github.com/LucasPeixotg/PaperWeightMCP"
+
+[tool.hatch.build.targets.wheel]
+packages = ["paperhook"]
+
+[tool.hatch.build.targets.sdist]
+# Explicit, so the demo video in assets/ stays out of the source distribution.
+include = ["paperhook", "tests", "README.md", "LICENSE", ".env.example"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

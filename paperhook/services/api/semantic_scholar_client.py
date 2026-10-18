@@ -1,7 +1,7 @@
 import logging
 
-from common import PaperData
-from config import settings
+from ...common import PaperData
+from ...config import settings
 
 from .api_client import APIError, ApiClient
 

@@ -13,12 +13,12 @@ import json
 import pytest
 from fastmcp.exceptions import ToolError
 
-from common import CitingPaperData
-from services.api.api_client import APIError
+from paperhook.common import CitingPaperData
+from paperhook.services.api.api_client import APIError
 
 # `tools.get_references` the attribute is the function (re-exported by tools/__init__),
 # so the module is fetched by name.
-module = importlib.import_module("tools.get_references")
+module = importlib.import_module("paperhook.tools.get_references")
 
 
 def test_an_unrecognised_identifier_is_a_tool_error(stub):

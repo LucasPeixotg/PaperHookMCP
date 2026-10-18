@@ -2,12 +2,12 @@ import json
 
 from fastmcp.exceptions import ToolError
 
-from common import PaperData
-from services.api import OpenAlexClient
-from services.api.api_client import APIError
-from services.cache import get_paper_store
-from services.fulltext import PdfClient, extract_text
-from utils import to_openalex_id
+from ..common import PaperData
+from ..services.api import OpenAlexClient
+from ..services.api.api_client import APIError
+from ..services.cache import get_paper_store
+from ..services.fulltext import PdfClient, extract_text
+from ..utils import to_openalex_id
 
 open_alex_client = OpenAlexClient()
 pdf_client = PdfClient()

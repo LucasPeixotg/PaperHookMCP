@@ -25,8 +25,8 @@ import logging
 
 import diskcache
 
-from common import PaperData
-from config import settings
+from ...common import PaperData
+from ...config import settings
 
 logger = logging.getLogger(__name__)
 

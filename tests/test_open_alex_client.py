@@ -19,11 +19,11 @@ import httpx
 import pytest
 from tenacity import wait_none
 
-from common import CitingPaperData, PaperData
-from config import settings
-from services.api.api_client import ApiClient, APIError
-from services.api.open_alex_client import OpenAlexClient
-from services.cache import PaperStore
+from paperhook.common import CitingPaperData, PaperData
+from paperhook.config import settings
+from paperhook.services.api.api_client import ApiClient, APIError
+from paperhook.services.api.open_alex_client import OpenAlexClient
+from paperhook.services.cache import PaperStore
 
 # Deliberately not the real host: a test that somehow escapes the mock should fail
 # loudly rather than quietly querying OpenAlex.

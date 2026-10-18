@@ -3,7 +3,7 @@
 import dataclasses
 from collections.abc import Collection
 
-from common import PaperData
+from ..common import PaperData
 
 
 def as_response_dict(paper: PaperData, dropped: Collection[str]) -> dict:

@@ -2,16 +2,24 @@
 
 Values below are defaults; any of them can be overridden via environment
 variables or the ``.env`` file at the repo root (e.g. ``DEFAULT_TOP_K=5`` in the
-environment takes precedence over the default here).
+environment takes precedence over the default here). The ``.env`` file only
+exists in a checkout; installed via ``uvx``, settings come from the environment
+the MCP client launches the server with.
 """
 
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Repo root, resolved from this file so paths work from any working directory
+# Repo root, resolved from this file so paths work from any working directory.
+# Installed as a package, this is site-packages instead, which holds no `.env`.
 ROOT_DIR = Path(__file__).resolve().parents[1]
+
+# Per-user cache root (XDG). Not under ROOT_DIR: installed via uvx, that is a
+# uv-managed environment that can be rebuilt at any time.
+USER_CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "paperhook"
 
 
 class Settings(BaseSettings):
@@ -29,7 +37,7 @@ class Settings(BaseSettings):
     # RERANKING
 
     # The cross-encoder that reorders search candidates in
-    # src/services/models/reranker.py.
+    # paperhook/services/models/reranker.py.
     RERANK_MODEL_ID: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     # The cost knob: every candidate in the pool is one cross-encoder forward
@@ -40,12 +48,11 @@ class Settings(BaseSettings):
 
     # CACHE
 
-    # The per-paper store in src/services/cache/paper_store.py: every paper a search
+    # The per-paper store in paperhook/services/cache/paper_store.py: every paper a search
     # or listing returns, keyed by `paper_id` with its DOI as an alias, and every
-    # request as a list of pointers to those records. Anchored to the repo root for
-    # the same reason as `.env` below; `.data/` is gitignored.
+    # request as a list of pointers to those records.
     CACHE_ENABLED: bool = True
-    CACHE_DIR: Path = ROOT_DIR / ".data" / "paper_cache"
+    CACHE_DIR: Path = USER_CACHE_DIR / "paper_cache"
     # Citation counts and URLs drift, so records expire rather than live forever.
     CACHE_TTL_SECONDS: int = 30 * 24 * 3600
     # Which papers a query or listing returns drifts faster than any one paper, so a
@@ -55,7 +62,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         # Anchored to the repo root so the same config works from any working
-        # directory — an MCP client launches src/server.py with a cwd of its own.
+        # directory — an MCP client launches the server with a cwd of its own.
         env_file=ROOT_DIR / ".env",
         env_file_encoding="utf-8",
         case_sensitive=False,

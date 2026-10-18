@@ -14,7 +14,7 @@ missing value to "" because every PaperData field is a required non-null string.
 
 import pytest
 
-from utils import (
+from paperhook.utils import (
     bare_doi,
     bare_openalex_id,
     bare_orcid,
