@@ -23,7 +23,7 @@ Imports are rooted at `src/` (`from config import settings`, `from common import
 
 ## Architecture
 
-FastMCP server (`src/server.py`) exposing tools. `find_relevant_papers` and `get_citations` are registered; the other modules in `src/tools/` (`fetch_full_paper`, `get_references`, etc.) are stubs that raise `ToolError("Not Yet Implemented")`, and their imports in `server.py` are commented out. No local corpus or database — every call hits public research APIs live.
+FastMCP server (`src/server.py`) exposing tools. `find_relevant_papers`, `get_citations`, `get_references`, `get_author_top_works` and `fetch_full_paper` are registered; the rest of `src/tools/` (`fetch_paper_artifacts`, etc.) are stubs that raise `ToolError("Not Yet Implemented")`, and their imports in `server.py` are commented out. No local corpus or database — every call hits public research APIs live.
 
 `find_relevant_papers` (`src/tools/find_relevant_papers/tool.py`) is a pipeline:
 1. `remove_wildcards` strips `*`/`?` (search APIs treat them as operators).
@@ -37,6 +37,8 @@ Output is JSON `{papers, relevant_without_abstract}`; `relevance_score` is strip
 `get_citations` (`src/tools/get_citations.py`) accepts only an OpenAlex ID (bare `W…` or `https://openalex.org/W…`; DOIs and arXiv IDs are rejected) and normalizes it with `to_openalex_id` for a `/works/{id}` lookup (in `src/utils/paper_id.py`, alongside the `bare_doi` / `bare_openalex_id` strippers the OpenAlex client maps through), then lists citing works with `filter=cites:W…`. Unlike the searches, these client methods raise `APIError`, and the tool turns it into a `ToolError`, so "paper not found" never looks like "no citations".
 
 `get_author_top_works` (`src/tools/get_author_top_works.py`) takes an OpenAlex author ID (`A…`), an ORCID, or a name; `to_openalex_author_key` (`src/utils/paper_id.py`) turns the first two into a `/authors/{key}` lookup and returns None for a name. A name is searched via `/authors` and must match exactly one author — several matches raise a `ToolError` listing the candidate IDs, since a namesake's list looks just as plausible. Works come from `filter=author.id:A…`, sorted by citations, with an optional `publication_year_min`.
+
+`fetch_full_paper` (`src/tools/fetch_full_paper.py`) takes an OpenAlex ID like `get_citations`. It returns the full text cached by `PaperStore.get_full_paper` if there is one; otherwise `OpenAlexClient.get_paper` fetches the one record (answered from the store when that record already has an `oa_pdf`), and `PdfClient` (`src/services/fulltext/pdf_client.py`) downloads `oa_pdf` and extracts it with pymupdf. Successful text is stored with `put_full_paper`. A paper with no `oa_pdf` is a `ToolError` that hands the caller its `oa_url` (labelled as the open-access URL) or, failing that, its `url` (saying there is no open-access URL) to fetch manually, and failed downloads and blank (scanned) text are never cached.
 
 Key shared pieces:
 - `PaperData` (`src/common/paper_data.py`) — the record every source maps into. Semantic Scholar has no relevance score, so its papers default to 0.0 and lose ties; revisit when re-enabling it. `url` is the best link to any copy (it may fall back to the publisher's); `oa_pdf` / `oa_url` are the open-access copy's direct PDF and landing page only (OpenAlex `best_oa_location`, S2 `openAccessPdf`), blank when there is none — the links `fetch_full_paper` should use.

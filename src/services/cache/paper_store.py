@@ -98,6 +98,20 @@ class PaperStore:
             return None
         return self._safe(lambda: self._cache.get(_paper_key(paper_id)))
 
+    def get_paper(
+        self, paper_id: str, cls: type[PaperData] = PaperData, relevance_score: float = 0.0
+    ) -> PaperData | None:
+        """The cached record for `paper_id` rebuilt as `cls`, or None."""
+        record = self.get(paper_id)
+        if record is None:
+            return None
+
+        names = {field.name for field in dataclasses.fields(cls)}
+        # Filtering on `cls`'s fields keeps `full_paper` off, and the listing fields
+        # off a plain PaperData.
+        fields = {key: value for key, value in record.items() if key in names}
+        return cls(**(_BLANKS | fields), relevance_score=relevance_score)
+
     def find(self, paper: PaperData) -> dict | None:
         """The cached record of `paper`, by its `paper_id` and then by its DOI."""
         return self._resolve(paper.paper_id, paper.doi)
@@ -168,16 +182,12 @@ class PaperStore:
         if entry is None:
             return None
 
-        names = {field.name for field in dataclasses.fields(cls)}
         papers = []
         for paper_id, score in entry["items"]:
-            record = self.get(paper_id)
-            if record is None:
+            paper = self.get_paper(paper_id, cls, relevance_score=score)
+            if paper is None:
                 return None
-            # Filtering on `cls`'s fields keeps `full_paper` off, and the listing
-            # fields off a plain PaperData.
-            fields = {key: value for key, value in record.items() if key in names}
-            papers.append(cls(**(_BLANKS | fields), relevance_score=score))
+            papers.append(paper)
         return papers, entry.get("total")
 
     def put_work_pointer(self, request_key: str, paper_id: str) -> None:

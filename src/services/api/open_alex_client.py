@@ -38,6 +38,13 @@ class OpenAlexClient(ApiClient):
     # the `cites:` filter, which accepts nothing but an OpenAlex id.
     WORK_SUMMARY_FIELDS = "id,display_name,cited_by_count"
 
+    # One work as a full record, for reaching its open-access copy. `SEARCH_FIELDS`
+    # without `relevance_score`: a lookup by id has no query to rank against.
+    PAPER_FIELDS = (
+        "id,doi,display_name,publication_year,"
+        "abstract_inverted_index,best_oa_location,primary_location"
+    )
+
     # Enough to tell namesakes apart when a name matches several authors, and to name
     # the one picked otherwise.
     AUTHOR_FIELDS = (
@@ -131,6 +138,34 @@ class OpenAlexClient(ApiClient):
             if key.startswith("doi:"):
                 self._paper_store.put_work_pointer(cache_key, work["paper_id"])
         return work
+
+    def get_paper(self, work_id: str) -> PaperData:
+        """One work as a full record, open-access links included, by bare `W…` id.
+
+        Raises APIError, as `get_work` does. A record already in the store with an
+        `oa_pdf` is answered from there: every search and listing selects
+        `best_oa_location`, so that link is as fresh as the record. One without it is
+        answered only from this lookup's own pointer, so that a work OpenAlex knows no
+        open-access PDF for is not asked about again on every call, but a record
+        written by `put_summary` alone never passes for "no PDF".
+        """
+        endpoint = f"/works/{work_id}"
+        params = {"select": self.PAPER_FIELDS}
+        cache_key = request_key("GET", endpoint, params)
+
+        if self._paper_store:
+            paper = self._paper_store.get_paper(work_id)
+            if paper and paper.title and paper.oa_pdf:
+                return paper
+            if cached := self._paper_store.get_pointers(cache_key, PaperData):
+                return cached[0][0]
+
+        payload = self._request("GET", endpoint, params=params)
+
+        [paper] = self._absorb([self._to_paper_data(payload)])
+        if self._paper_store:
+            self._paper_store.put_pointers(cache_key, [paper])
+        return paper
 
     def _cached_work(self, key: str, cache_key: str) -> dict | None:
         if not self._paper_store:

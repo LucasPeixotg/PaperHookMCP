@@ -851,6 +851,30 @@ def test_get_work_raises_on_404(monkeypatch):
         client.get_work("W0")
 
 
+def test_get_paper_maps_the_full_record_with_its_oa_links(monkeypatch):
+    best = location(pdf_url="https://oa.test/p.pdf", landing_page_url="https://oa.test/p")
+    handler, calls = recorder(httpx.Response(200, json=item(best_oa_location=best)))
+    client = make_client(monkeypatch, handler)
+
+    paper = client.get_paper("W2626778328")
+
+    assert calls[0].url.path == "/openalex/works/W2626778328"
+    assert calls[0].url.params["select"] == OpenAlexClient.PAPER_FIELDS
+    assert "relevance_score" not in OpenAlexClient.PAPER_FIELDS
+    assert paper.paper_id == "W2626778328"
+    assert paper.title == "Attention Is All You Need"
+    assert paper.oa_pdf == "https://oa.test/p.pdf"
+    assert paper.oa_url == "https://oa.test/p"
+
+
+def test_get_paper_raises_on_404(monkeypatch):
+    handler, _ = recorder(httpx.Response(404, text="not found"))
+    client = make_client(monkeypatch, handler)
+
+    with pytest.raises(APIError, match="404"):
+        client.get_paper("W0")
+
+
 # --- authors ------------------------------------------------------------------
 #
 # Like the citation lookups, these raise APIError: the tool must tell "no such author"
@@ -1209,4 +1233,52 @@ def test_a_failed_author_lookup_is_not_cached(monkeypatch, paper_store):
     with pytest.raises(APIError):
         client.get_author("A5001234567")
     assert client.get_author("A5001234567") == ADA
+    assert len(calls) == 2
+
+
+def test_get_paper_uses_a_record_with_an_oa_pdf(monkeypatch, paper_store):
+    best = location(pdf_url="https://oa.test/p.pdf")
+    handler, calls = recorder(ok(item(best_oa_location=best)))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.semantic_search_papers("attention")
+    paper = client.get_paper("W2626778328")
+
+    assert paper.oa_pdf == "https://oa.test/p.pdf"
+    assert paper.abstract == PLAIN_ABSTRACT
+    assert paper.relevance_score == 0.0
+    assert len(calls) == 1
+
+
+def test_get_paper_asks_about_a_record_without_an_oa_pdf(monkeypatch, paper_store):
+    """A listing's record without a PDF is not this lookup's answer, so it is sent."""
+    handler, calls = recorder(ok(item()), httpx.Response(200, json=item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    client.semantic_search_papers("attention")
+    client.get_paper("W2626778328")
+
+    assert len(calls) == 2
+
+
+def test_get_paper_without_an_oa_pdf_is_asked_once(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(200, json=item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    first = client.get_paper("W2626778328")
+    second = client.get_paper("W2626778328")
+
+    assert first.oa_pdf == second.oa_pdf == ""
+    assert second.title == "Attention Is All You Need"
+    assert len(calls) == 1
+
+
+def test_a_failed_get_paper_is_not_cached(monkeypatch, paper_store):
+    handler, calls = recorder(httpx.Response(500, text="boom"),
+                              httpx.Response(200, json=item()))
+    client = make_cached_client(monkeypatch, handler, paper_store)
+
+    with pytest.raises(APIError):
+        client.get_paper("W2626778328")
+    assert client.get_paper("W2626778328").title == "Attention Is All You Need"
     assert len(calls) == 2
