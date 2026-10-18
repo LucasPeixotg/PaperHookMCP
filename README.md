@@ -3,11 +3,13 @@
 # Paper Hook MCP
 
 An MCP server that finds the academic papers most relevant to a natural-language
-research question.
+research question, then lets you follow them: forward to the work that cites them,
+back to the work they cite, and over to an author's most-cited publications.
 
-It holds no local corpus and no database. Every query is answered by searching
-public research APIs live, then merging and reranking the candidates locally with
-a cross-encoder before handing back a short, ordered list.
+It holds no local corpus. Every query is answered by searching public research APIs
+live, then merging and reranking the candidates locally with a cross-encoder before
+handing back a short, ordered list. Responses are cached on disk so repeat lookups
+stay cheap.
 
 ## Demo
 
@@ -31,6 +33,30 @@ A call to `find_relevant_papers` runs one pipeline
 5. **Split** — the top `top_k` slots are filled only with papers that actually carry
    an abstract; higher-ranked papers whose source publishes no abstract are returned
    separately rather than dropped.
+
+### Following citations and authors
+
+`get_citations`, `get_references` and `get_author_top_works` list works straight from
+OpenAlex, with no reranking:
+
+- `get_citations` (forward) and `get_references` (backward) take only an OpenAlex work
+  ID, bare (`W2626778328`) or as a URL (`https://openalex.org/W2626778328`). DOIs and
+  arXiv IDs are rejected. The target work is looked up first, so a paper that does not
+  exist raises an error rather than looking like one with no citations.
+- `get_author_top_works` takes an OpenAlex author ID (`A5001234567`), an ORCID, or a
+  name. A name must match exactly one OpenAlex author. If it matches several, the error
+  lists up to five candidates with their IDs, since picking the top hit would silently
+  mix up namesakes.
+
+### Caching
+
+Every paper the tools see is stored on disk (diskcache, at `.data/paper_cache/`, which
+is gitignored), keyed by `paper_id` with its DOI as an alias. Each API request is cached
+separately as a list of pointers to those records, so a paper shared by several queries
+is stored once and stays consistent across them. Records expire after 30 days and request
+pointers after one day, because which papers a query returns drifts faster than any one
+paper does. Failures are never cached. If the cache errors, it is logged and the tools
+carry on without it. Set `CACHE_ENABLED=false` to turn it off.
 
 ## Requirements
 
@@ -70,7 +96,14 @@ The server speaks MCP over stdio. To register it with an MCP client:
 | Tool | Signature | Returns |
 | --- | --- | --- |
 | `find_relevant_papers` | `(query: str, top_k: int = 5) -> str` | JSON with `papers` and `relevant_without_abstract` |
+| `get_citations` | `(paper_id: str, limit: int = 10, sort: "most_cited" \| "newest" = "most_cited") -> str` | JSON list of papers citing the target |
+| `get_references` | `(paper_id: str, limit: int = 10, sort: "most_cited" \| "newest" = "most_cited") -> str` | JSON list of papers the target cites |
+| `get_author_top_works` | `(author: str, limit: int = 10, publication_year_min: int \| None = None) -> str` | JSON list of the author's works, most cited first |
 
+`limit` is capped at 200. The `paper_id` that `find_relevant_papers` returns is an
+OpenAlex work ID, so it can be passed straight to `get_citations` or `get_references`.
+
+### `find_relevant_papers`
 
 Each paper in either list carries the same seven fields:
 
@@ -90,6 +123,20 @@ whose abstract the source does not publish. That often means the work is not ope
 available, though not always; some publishers restrict the abstract alone. They are
 still worth following by DOI or URL.
 
+### `get_citations`, `get_references`, `get_author_top_works`
+
+Each paper carries the fields above except `abstract` (no query ranked these works,
+and abstracts are not fetched for them), plus two fields for judging a work without
+reading it:
+
+| Field | Meaning |
+| --- | --- |
+| `venue` | Journal or conference it appeared in, when known |
+| `cited_by_count` | How many works cite it |
+
+`get_references` lists only the references OpenAlex could match to a work, so the list
+may be shorter than the paper's printed bibliography.
+
 ## Configuration
 
 Settings live in `src/config.py` and can be overridden through the environment or
@@ -104,6 +151,11 @@ rate limits and daily budgets.
 | `SEMANTIC_SCHOLAR_API_TOKEN` | *(empty)* | Optional; sent as `x-api-key` |
 | `RERANK_MODEL_ID` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder used for reranking |
 | `RERANK_CANDIDATE_POOL` | `40` | Candidates to rerank; the cost knob — one forward pass each. Past 50 buys nothing, since OpenAlex caps its semantic endpoint there. |
+| `CACHE_ENABLED` | `true` | Turns the disk cache on or off |
+| `CACHE_DIR` | `.data/paper_cache` | Where the cache lives, relative to the repo root |
+| `CACHE_TTL_SECONDS` | `2592000` (30 days) | How long a paper record is kept |
+| `REQUEST_CACHE_TTL_SECONDS` | `86400` (1 day) | How long a cached request's result list is kept |
+| `CACHE_SIZE_LIMIT_MB` | `512` | Size cap for the cache on disk |
 
 ## Layout
 
@@ -114,12 +166,21 @@ src/
   common/paper_data.py             PaperData — the record every source maps into
   services/
     api/api_client.py              Shared HTTP client: headers, retries, error wrapping
-    api/open_alex_client.py        OpenAlex keyword and semantic search
-    api/semantic_scholar_client.py Semantic Scholar Graph API search
+    api/open_alex_client.py        OpenAlex search, work/author lookups, citation links
+    api/semantic_scholar_client.py Semantic Scholar Graph API search (not wired in)
+    api/arxiv_api_client.py        Placeholder, empty
+    cache/paper_store.py           Disk cache of paper records and request pointers
     models/reranker.py             Cross-encoder reranking
+  utils/
+    paper_id.py                    Normalising OpenAlex work/author IDs, DOIs, ORCIDs
+    response.py                    Shaping records into tool responses
   tools/
-    find_relevant_papers/          The one registered tool, plus its query cleaner
-                                   and deduplicator
+    find_relevant_papers/          Search tool, plus its query cleaner and deduplicator
+    get_citations.py               Forward citations
+    get_references.py              Backward citations
+    get_author_top_works.py        An author's most-cited works
+    fetch_full_paper.py            Stub, not registered
+    fetch_paper_artifacts.py       Stub, not registered
 tests/
 ```
 
@@ -136,11 +197,12 @@ and the reranker suite stubs the cross-encoder out.
 
 ## Status
 
-Only `find_relevant_papers` is registered today. Also in the plans, but not yet wired up:
+Four tools are registered: `find_relevant_papers`, `get_citations`, `get_references`
+and `get_author_top_works`. Planned but not yet implemented (they exist as stubs that
+raise "Not Yet Implemented"):
 
 - `fetch_full_paper`
 - `fetch_paper_artifacts`
-- `get_author_top_works`
 
 and more ...
 
