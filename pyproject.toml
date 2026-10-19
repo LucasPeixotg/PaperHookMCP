@@ -38,7 +38,7 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.scripts]
-paperhook-mcp = "paperhook.server:main"
+paperhook-mcp = "paperhook.cli:main"
 
 [project.urls]
 Repository = "https://github.com/LucasPeixotg/PaperWeightMCP"

@@ -11,13 +11,14 @@ pip install -e ".[dev]"                  # ~1 GB: sentence-transformers pulls in
 cp .env.example .env
 
 paperhook-mcp                            # MCP server over stdio (or: python -m paperhook.server)
+paperhook-mcp --doctor                   # startup diagnostics (cache, OpenAlex, model, tools); exit 1 on failure
 uvx --from . paperhook-mcp               # same, as users run it (git+https://… URL in README)
 pytest                                   # all tests (no network)
 pytest tests/test_reranker.py            # one file
 pytest tests/test_reranker.py -k tie     # one test by name
 ```
 
-Python 3.13. No linter/formatter is configured. `pyproject.toml` (hatchling) is the single source of dependencies and defines the `paperhook-mcp` console script (`paperhook.server:main`). torch is a direct dependency only so `[tool.uv.sources]` can pin it to the PyTorch CPU index (uv, uvx and git installs honor it; pip needs the `--index-url` line above).
+Python 3.13. No linter/formatter is configured. `pyproject.toml` (hatchling) is the single source of dependencies and defines the `paperhook-mcp` console script (`paperhook.cli:main`, which parses `--doctor` before importing `server.py`, since that import loads the model). torch is a direct dependency only so `[tool.uv.sources]` can pin it to the PyTorch CPU index (uv, uvx and git installs honor it; pip needs the `--index-url` line above).
 
 ## Package layout
 

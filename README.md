@@ -115,6 +115,24 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev]"
 ```
 
+### Troubleshooting
+
+An MCP client usually reports a broken server only as "disconnected". Run the
+diagnostics in a terminal instead, with the same environment variables the client sets:
+
+```bash
+uvx --from git+https://github.com/LucasPeixotg/PaperHookMCP paperhook-mcp --doctor
+```
+
+```
+[✓] Cache directory writable (~/.cache/paperhook/paper_cache)
+[✓] OpenAlex API reachable (API key set)
+[✓] Cross-encoder weights loaded (cross-encoder/ms-marco-MiniLM-L-6-v2)
+[✓] MCP stdio transport ready (5 tools registered)
+```
+
+A failing check prints `[✗]` and a hint, and the command exits with status 1.
+
 ## Tools
 
 | Tool | Signature | Returns |
